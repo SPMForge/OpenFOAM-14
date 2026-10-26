@@ -14,7 +14,10 @@ from scripts.spm import packaging
 
 
 def required_release_asset_names(upstream_tag: str) -> tuple[str, ...]:
-    return tuple(packaging.asset_name_for_variant(variant, upstream_tag) for variant in packaging.VARIANTS)
+    return (
+        tuple(packaging.asset_name_for_variant(variant, upstream_tag) for variant in packaging.VARIANTS)
+        + (packaging.source_asset_name(upstream_tag),)
+    )
 
 
 def _load_release_view(path: Path | None) -> dict[str, object] | None:

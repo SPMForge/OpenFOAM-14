@@ -63,10 +63,33 @@ class ReleaseStateTests(unittest.TestCase):
     def test_required_release_asset_names_cover_all_variants(self) -> None:
         self.assertEqual(
             release_state.required_release_asset_names("20261008"),
-            ("OpenFOAM-14-20261008-apple.xcframework.zip",),
+            (
+                "OpenFOAM-14-20261008-apple.xcframework.zip",
+                "OpenFOAM-14-20261008-source.tar.gz",
+            ),
         )
 
     def test_complete_alpha_release_skips(self) -> None:
+        payload = release_state.inspect_release_state(
+            package_tag="14.0.20261008-alpha.1",
+            upstream_tag="20261008",
+            release_channel="sync",
+            tag_exists=True,
+            release_view={
+                "isPrerelease": True,
+                "assets": [
+                    {"name": "OpenFOAM-14-20261008-apple.xcframework.zip"},
+                    {"name": "OpenFOAM-14-20261008-source.tar.gz"},
+                ],
+            },
+            latest_release_tag=None,
+        )
+
+        self.assertEqual(payload["mode"], "skip")
+        self.assertFalse(payload["metadata_needs_repair"])
+        self.assertEqual(payload["missing_assets"], [])
+
+    def test_release_repairs_when_source_tarball_missing(self) -> None:
         payload = release_state.inspect_release_state(
             package_tag="14.0.20261008-alpha.1",
             upstream_tag="20261008",
@@ -81,9 +104,8 @@ class ReleaseStateTests(unittest.TestCase):
             latest_release_tag=None,
         )
 
-        self.assertEqual(payload["mode"], "skip")
-        self.assertFalse(payload["metadata_needs_repair"])
-        self.assertEqual(payload["missing_assets"], [])
+        self.assertEqual(payload["mode"], "repair")
+        self.assertEqual(payload["missing_assets"], ["OpenFOAM-14-20261008-source.tar.gz"])
 
     def test_alpha_release_repairs_metadata_when_latest_or_not_prerelease(self) -> None:
         payload = release_state.inspect_release_state(

@@ -44,6 +44,7 @@ def _assert_license_conformance(repo_root: Path) -> None:
     license_path = repo_root / "LICENSE"
     require(copying_path.exists(), "OpenFOAM-14 must include root COPYING file")
     require(license_path.exists(), "OpenFOAM-14 must include root LICENSE file or symlink")
+    require(license_path.is_symlink() and license_path.readlink() == Path("COPYING"), "OpenFOAM-14 root LICENSE must be a relative symlink to COPYING")
     copying_text = read_text(copying_path)
     license_text = read_text(license_path)
     require("GNU GENERAL PUBLIC LICENSE" in copying_text, "COPYING must contain GNU General Public License")
@@ -62,6 +63,9 @@ def _assert_license_conformance(repo_root: Path) -> None:
     core_workflow = read_text(repo_root / ".github" / "workflows" / "_publish-upstream-release-core.yml")
     require("OpenFOAM-14-${{ needs.resolve.outputs.upstream_tag }}-source.tar.gz" in core_workflow, "workflow must archive and publish source.tar.gz")
     require("*.source.tar.gz" in core_workflow, "workflow must upload source tarball artifact")
+
+    release_state_script = read_text(repo_root / "scripts" / "spm" / "release_state.py")
+    require("packaging.source_asset_name" in release_state_script, "release_state.py must include source tarball in required release assets")
 
 
 def _assert_no_hardcoded_deployment_targets(repo_root: Path, file_paths: tuple[Path, ...]) -> None:

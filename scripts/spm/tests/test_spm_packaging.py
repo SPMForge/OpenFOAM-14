@@ -370,6 +370,25 @@ class SOPConformanceTests(unittest.TestCase):
                 )
                 self.assertTrue((ios_fw / "LICENSE").is_file())
 
+    def test_create_xcframework_embeds_license(self) -> None:
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temp_root = Path(temporary_directory)
+            out_dir = temp_root / "out"
+            out_dir.mkdir()
+            fake_fw = out_dir / "OpenFOAM.framework"
+            fake_fw.mkdir()
+            variant = packaging.OPENFOAM_VARIANT
+
+            def fake_run(command, env=None):
+                (out_dir / f"{variant.target_name}.xcframework").mkdir(parents=True, exist_ok=True)
+
+            with mock.patch("scripts.spm.build_apple_xcframework._run", side_effect=fake_run):
+                xcfw = build_apple_xcframework._create_xcframework(
+                    variant=variant, staged_frameworks=[fake_fw], output_dir=out_dir, environment={}
+                )
+                self.assertTrue((xcfw / "LICENSE").is_file())
+
 
 class PreflightValidationTests(unittest.TestCase):
     def test_rejects_platform_list_drift(self) -> None:

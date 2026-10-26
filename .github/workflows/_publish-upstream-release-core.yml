@@ -226,7 +226,7 @@ jobs:
         run: ccache --show-stats
       - name: Archive patched source tarball
         run: |
-          tar -czf "${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/OpenFOAM-14-${{ needs.resolve.outputs.upstream_tag }}-source.tar.gz" \
+          COPYFILE_DISABLE=1 tar -czf "${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/OpenFOAM-14-${{ needs.resolve.outputs.upstream_tag }}-source.tar.gz" \
             -C "${RUNNER_TEMP}/upstream-source" .
       - name: Upload built artifacts
         id: upload-artifacts

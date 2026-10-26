@@ -239,6 +239,11 @@ def asset_name_for_variant(variant: Variant, upstream_tag: str) -> str:
     return f"OpenFOAM-14-{normalized}-apple{variant.asset_suffix}.xcframework.zip"
 
 
+def source_asset_name(upstream_tag: str) -> str:
+    normalized = validate_upstream_tag(upstream_tag)
+    return f"OpenFOAM-14-{normalized}-source.tar.gz"
+
+
 def release_url(owner: str, repo: str, package_tag: str, variant: Variant, upstream_tag: str) -> str:
     asset_name = asset_name_for_variant(variant, upstream_tag)
     return f"https://github.com/{owner}/{repo}/releases/download/{package_tag}/{asset_name}"

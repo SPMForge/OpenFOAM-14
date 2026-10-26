@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   publish:
+    name: Alpha Release
     uses: ./.github/workflows/_publish-upstream-release-core.yml
     with:
       release_channel: sync

@@ -26,6 +26,7 @@ permissions:
 
 jobs:
   publish:
+    name: Requested Release
     uses: ./.github/workflows/_publish-upstream-release-core.yml
     with:
       upstream_tag: ${{ inputs.upstream_tag }}

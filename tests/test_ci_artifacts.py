@@ -14,6 +14,15 @@ spec.loader.exec_module(module)
 
 
 class ArtifactEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        (root / 'Package.swift').write_text('// isolated summary fixture\n')
+        patcher = patch.object(module, 'ROOT', root)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_transfer_corruption_blocks_consumer_execution(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

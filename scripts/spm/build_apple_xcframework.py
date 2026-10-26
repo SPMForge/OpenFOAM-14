@@ -1136,7 +1136,7 @@ def _create_xcframework(
 
     repo_root = Path(__file__).resolve().parents[2]
     license_source = repo_root / "LICENSE" if (repo_root / "LICENSE").exists() else repo_root / "COPYING"
-    if license_source.exists():
+    if license_source.exists() and xcframework_path.exists():
         shutil.copy2(license_source, xcframework_path / "LICENSE")
 
     return xcframework_path

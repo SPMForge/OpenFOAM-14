@@ -224,6 +224,10 @@ jobs:
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
         run: ccache --show-stats
+      - name: Archive patched source tarball
+        run: |
+          tar -czf "${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/OpenFOAM-14-${{ needs.resolve.outputs.upstream_tag }}-source.tar.gz" \
+            -C "${RUNNER_TEMP}/upstream-source" .
       - name: Upload built artifacts
         id: upload-artifacts
         continue-on-error: true
@@ -234,6 +238,7 @@ jobs:
           path: |
             ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/*.xcframework.zip
             ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/${{ matrix.variant }}.release.json
+            ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/*.source.tar.gz
       - name: Retry upload built artifacts
         id: retry-upload-artifacts
         if: steps.upload-artifacts.outcome != 'success'
@@ -244,6 +249,7 @@ jobs:
           path: |
             ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/*.xcframework.zip
             ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/${{ matrix.variant }}.release.json
+            ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/*.source.tar.gz
 
   release:
     needs:
@@ -434,6 +440,7 @@ jobs:
           set -euo pipefail
           assets=(
             artifacts/OpenFOAM/OpenFOAM-14-${{ needs.resolve.outputs.upstream_tag }}-apple.xcframework.zip
+            artifacts/OpenFOAM/OpenFOAM-14-${{ needs.resolve.outputs.upstream_tag }}-source.tar.gz
           )
           if [[ "${{ steps.release_status.outputs.release_exists }}" != "true" ]]; then
             release_args=(
@@ -441,7 +448,7 @@ jobs:
               "${assets[@]}"
               --repo "${{ github.repository }}"
               --title "${{ steps.publication_plan.outputs.final_package_tag }}"
-              --notes "Automated SwiftPM binary release for upstream OpenFOAM-14 tag ${{ needs.resolve.outputs.upstream_tag }}."
+              --notes "Automated SwiftPM binary release for upstream OpenFOAM-14 tag ${{ needs.resolve.outputs.upstream_tag }}. Includes Corresponding Source tarball in accordance with GNU GPLv3."
               --target "${{ steps.release_commit.outputs.sha }}"
             )
             if [[ "${{ inputs.release_channel }}" != "stable" ]]; then

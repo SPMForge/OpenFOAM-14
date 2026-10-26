@@ -89,3 +89,19 @@ The helper fetches upstream tags from `https://github.com/OpenFOAM/OpenFOAM-14.g
 - `.github/workflows/_publish-upstream-release-core.yml`
 
 See [docs/how-to-build/swiftpm-binary-package.md](docs/how-to-build/swiftpm-binary-package.md) for the full operator contract.
+
+## License
+
+This repository and its distributed binary frameworks are licensed under the **GNU General Public License v3.0** (see [COPYING](COPYING) or [LICENSE](LICENSE)), identical to and in compliance with upstream [`OpenFOAM/OpenFOAM-14`](https://github.com/OpenFOAM/OpenFOAM-14).
+
+All SPM wrapper code, Darwin compatibility patches, and the C/C++ bridge surface (`foam_spm_bridge.C`) are distributed under the terms of GNU GPLv3 as derivative/associated works.
+
+> [!WARNING]
+> ### Important Legal Notice: Apple App Store & GPLv3 Distribution
+> OpenFOAM is licensed under the **GNU General Public License v3.0 (GPLv3)**.
+> - **Copyleft Requirement**: Any application or library that links against `OpenFOAM.framework` must make its complete corresponding source code available under GPLv3.
+> - **App Store DRM Restriction Conflict**: The terms of GNU GPLv3 (Section 10) forbid imposing further restrictions on the exercise of granted rights. The digital rights management (DRM) and distribution terms enforced by the Apple App Store conflict with GPLv3.
+> - **Usage Recommendation**: We strongly advise developers **NOT** to distribute closed-source applications linking OpenFOAM via the public Apple App Store. This package is ideal for academic research, internal computational pipelines, self-hosted distribution, Ad-Hoc / Developer ID signed macOS software, or open-source GPLv3-compliant iOS apps.
+
+### Corresponding Source Distribution
+In accordance with GPLv3 Section 6, each automated release on this repository publishes the exact corresponding source tarball (`OpenFOAM-14-<tag>-source.tar.gz`) containing all Darwin patches and bridge translation units alongside the precompiled binary `.xcframework.zip` on [GitHub Releases](https://github.com/SPMForge/OpenFOAM-14/releases).

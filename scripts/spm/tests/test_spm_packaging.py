@@ -344,6 +344,32 @@ class SOPConformanceTests(unittest.TestCase):
     def test_repo_passes_sop_conformance(self) -> None:
         self.assertEqual(verify_sop_conformance.main(REPO_ROOT), 0)
 
+    def test_stage_framework_bundle_embeds_license(self) -> None:
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temp_root = Path(temporary_directory)
+            binary_src = temp_root / "bin"
+            binary_src.write_bytes(b"binary")
+            headers_src = temp_root / "headers"
+            headers_src.mkdir()
+            (headers_src / "OpenFOAM.h").write_text("// test")
+            output_dir = temp_root / "out"
+
+            macos_platform = next(p for p in packaging.OPENFOAM_VARIANT.platforms if p.swiftpm_platform == "macos")
+            ios_platform = next(p for p in packaging.OPENFOAM_VARIANT.platforms if p.swiftpm_platform == "ios")
+
+            with mock.patch("scripts.spm.build_apple_xcframework._run"):
+                macos_fw = build_apple_xcframework._stage_framework_bundle(
+                    binary_src, headers_src, output_dir, "OpenFOAM", "OpenFOAM", macos_platform, {}
+                )
+                self.assertTrue((macos_fw / "Versions" / "A" / "Resources" / "LICENSE").is_file())
+                self.assertTrue((macos_fw / "Resources" / "LICENSE").is_file())
+
+                ios_fw = build_apple_xcframework._stage_framework_bundle(
+                    binary_src, headers_src, output_dir / "ios", "OpenFOAM", "OpenFOAM", ios_platform, {}
+                )
+                self.assertTrue((ios_fw / "LICENSE").is_file())
+
 
 class PreflightValidationTests(unittest.TestCase):
     def test_rejects_platform_list_drift(self) -> None:

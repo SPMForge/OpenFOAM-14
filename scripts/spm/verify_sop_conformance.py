@@ -39,6 +39,31 @@ def _load_platform_deployment_targets(repo_root: Path) -> dict[str, str]:
     return {str(key): str(value) for key, value in package_platforms.items()}
 
 
+def _assert_license_conformance(repo_root: Path) -> None:
+    copying_path = repo_root / "COPYING"
+    license_path = repo_root / "LICENSE"
+    require(copying_path.exists(), "OpenFOAM-14 must include root COPYING file")
+    require(license_path.exists(), "OpenFOAM-14 must include root LICENSE file or symlink")
+    copying_text = read_text(copying_path)
+    license_text = read_text(license_path)
+    require("GNU GENERAL PUBLIC LICENSE" in copying_text, "COPYING must contain GNU General Public License")
+    require("GNU GENERAL PUBLIC LICENSE" in license_text, "LICENSE must resolve to GNU General Public License")
+
+    readme = read_text(repo_root / "README.md")
+    require("## License" in readme, "README must contain ## License section")
+    require("GNU General Public License v3.0" in readme, "README must disclose GNU General Public License v3.0")
+    require("Apple App Store & GPLv3 Distribution" in readme, "README must include Apple App Store GPLv3 conflict notice")
+    require("Corresponding Source Distribution" in readme, "README must disclose Corresponding Source distribution")
+
+    build_script = read_text(repo_root / "scripts" / "spm" / "build_apple_xcframework.py")
+    require('license_target = info_plist_path.parent / "LICENSE"' in build_script, "build script must stage LICENSE in macOS framework Resources")
+    require('xcframework_path / "LICENSE"' in build_script, "build script must stage LICENSE in XCFramework root")
+
+    core_workflow = read_text(repo_root / ".github" / "workflows" / "_publish-upstream-release-core.yml")
+    require("OpenFOAM-14-${{ needs.resolve.outputs.upstream_tag }}-source.tar.gz" in core_workflow, "workflow must archive and publish source.tar.gz")
+    require("*.source.tar.gz" in core_workflow, "workflow must upload source tarball artifact")
+
+
 def _assert_no_hardcoded_deployment_targets(repo_root: Path, file_paths: tuple[Path, ...]) -> None:
     deployment_targets = sorted(set(_load_platform_deployment_targets(repo_root).values()))
     for path in file_paths:
@@ -204,6 +229,7 @@ def main(repo_root: Path = REPO_ROOT) -> int:
     )
     require((repo_root / "scripts" / "spm" / "platforms.json").exists(), "platform metadata must exist")
     require((repo_root / "scripts" / "spm" / "current_release.json").exists(), "release metadata must exist")
+    _assert_license_conformance(repo_root)
 
     print("OpenFOAM-14 SOP conformance verified")
     return 0

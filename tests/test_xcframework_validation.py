@@ -57,9 +57,8 @@ class XCFrameworkValidationTests(unittest.TestCase):
             (resources_path / "Info.plist").write_bytes(plistlib.dumps({"CFBundlePackageType": "FMWK"}))
             (modules_path / "module.modulemap").write_text(
                 f"""framework module {framework_name} {{
-    umbrella "../Headers"
+    header "OpenFOAM.h"
     export *
-    module * {{ export * }}
 }}
 """
             )
@@ -79,9 +78,8 @@ class XCFrameworkValidationTests(unittest.TestCase):
         (framework_root / "Resources" / "Info.plist").write_bytes(plistlib.dumps({"CFBundlePackageType": "FMWK"}))
         (framework_root / "Modules" / "module.modulemap").write_text(
             f"""framework module {framework_name} {{
-    umbrella "../Headers"
+    header "OpenFOAM.h"
     export *
-    module * {{ export * }}
 }}
 """
         )

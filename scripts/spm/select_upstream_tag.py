@@ -83,7 +83,7 @@ def _resolve_upstream_tag(arguments: argparse.Namespace) -> str:
 
     ref_prefix = arguments.ref_prefix
     if not ref_prefix:
-        contract_path = arguments.repo_root / "scripts" / "spm" / "source_acquisition.json"
+        contract_path = arguments.repo_root / "config" / "source_acquisition.json"
         if contract_path.exists():
             _, contract = source_acquisition._contract_for_repo(arguments.repo_root, None)
             ref_prefix = contract["upstream_tag_ref_prefix"]
@@ -110,15 +110,7 @@ def _resolve_release_tags(arguments: argparse.Namespace, upstream_tag: str) -> t
         alpha_number=packaging.next_alpha_number_for_upstream_tag(upstream_tag, package_refs),
     )
 
-    if arguments.release_channel == "sync":
-        if latest_alpha_tag is None:
-            return next_alpha_tag, "", next_alpha_tag
-        return latest_alpha_tag, latest_alpha_tag, next_alpha_tag
-
-    if arguments.release_channel not in {"alpha", "backfill"}:
-        return packaging.package_tag_for_upstream_tag(upstream_tag), "", ""
-
-    return next_alpha_tag, latest_alpha_tag or "", next_alpha_tag
+    return latest_alpha_tag or next_alpha_tag, latest_alpha_tag or "", next_alpha_tag
 
 
 def main() -> int:

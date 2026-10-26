@@ -76,7 +76,7 @@ The packaged `OpenFOAM.framework` slices are built with `MERGEABLE_LIBRARY=YES`.
 
 Upstream source acquisition is owned by repo-local files:
 
-- `scripts/spm/source_acquisition.json`
+- `config/source_acquisition.json`
 - `scripts/spm/source_acquisition.py`
 
 The helper fetches upstream tags from `https://github.com/OpenFOAM/OpenFOAM-14.git` into `refs/upstream-tags/*` and exports the selected tag into a temporary worktree for building.
@@ -105,3 +105,11 @@ All SPM wrapper code, Darwin compatibility patches, and the C/C++ bridge surface
 
 ### Corresponding Source Distribution
 In accordance with GPLv3 Section 6, each automated release on this repository publishes the exact corresponding source tarball (`OpenFOAM-14-<tag>-source.tar.gz`) containing all Darwin patches and bridge translation units alongside the precompiled binary `.xcframework.zip` on [GitHub Releases](https://github.com/SPMForge/OpenFOAM-14/releases).
+
+## Release Input Identity
+
+New releases record immutable upstream and wrapper input identity in
+`config/release-inputs.json`. Scheduled and manual alpha use the same reuse/evaluate
+policy and repository publication lock. See the
+[repeat-publication SOP](docs/how-to-build/swiftpm-binary-package.md#immutable-source-and-repeat-publication-sop)
+for source pinning, legacy tags, strict repair checks, and verification boundaries.

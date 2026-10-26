@@ -162,6 +162,8 @@ def _framework_interface_issues(framework_path: Path) -> list[str]:
         issues.extend(_framework_header_include_issues(headers_path, framework_path.stem))
     if not module_map_path.is_file():
         issues.append("framework bundle missing Modules/module.modulemap")
+    elif 'umbrella "../Headers"' in module_map_path.read_text(encoding="utf-8", errors="ignore"):
+        issues.append('framework bundle Modules/module.modulemap must not use broken relative umbrella "../Headers"')
     return issues
 
 

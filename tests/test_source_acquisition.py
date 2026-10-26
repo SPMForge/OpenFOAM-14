@@ -7,9 +7,9 @@ import unittest
 from scripts.spm import source_acquisition
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ACQUISITION_SCRIPT = REPO_ROOT / "scripts" / "spm" / "source_acquisition.py"
-SOURCE_ACQUISITION_CONTRACT = REPO_ROOT / "scripts" / "spm" / "source_acquisition.json"
+SOURCE_ACQUISITION_CONTRACT = REPO_ROOT / "config" / "source_acquisition.json"
 
 
 class SourceAcquisitionContractTests(unittest.TestCase):

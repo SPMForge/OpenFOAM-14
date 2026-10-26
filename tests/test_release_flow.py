@@ -10,7 +10,7 @@ from scripts.spm import packaging
 from scripts.spm import tag_selection
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 SELECT_UPSTREAM_TAG_SCRIPT = REPO_ROOT / "scripts" / "spm" / "select_upstream_tag.py"
 
 
@@ -165,7 +165,16 @@ class SelectUpstreamTagScriptTests(unittest.TestCase):
             self.assertEqual(payload["next_package_tag"], "14.0.20261008-alpha.2")
             self.assertTrue(payload["remote_tag_exists"])
 
-    def test_backfill_mode_bumps_alpha_number_when_package_tag_exists(self) -> None:
+    def test_manual_alpha_reuses_latest_candidate_before_build(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo_root = Path(directory)
+            self._init_git_repo(repo_root)
+            subprocess.run(["git", "tag", "14.0.20261008-alpha.2"], cwd=repo_root, check=True)
+            payload = self._run_script(repo_root, "--explicit-tag", "20261008", "--release-channel", "alpha")
+            self.assertEqual(payload["build_tag"], "14.0.20261008-alpha.2")
+            self.assertEqual(payload["next_package_tag"], "14.0.20261008-alpha.3")
+
+    def test_backfill_alias_reuses_latest_candidate_before_build(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repo_root = Path(temporary_directory)
             self._init_git_repo(repo_root)
@@ -174,10 +183,10 @@ class SelectUpstreamTagScriptTests(unittest.TestCase):
 
             payload = self._run_script(repo_root, "--explicit-tag", "20261008", "--release-channel", "backfill")
 
-            self.assertEqual(payload["build_tag"], "14.0.20261008-alpha.3")
+            self.assertEqual(payload["build_tag"], "14.0.20261008-alpha.2")
             self.assertEqual(payload["latest_package_tag"], "14.0.20261008-alpha.2")
             self.assertEqual(payload["next_package_tag"], "14.0.20261008-alpha.3")
-            self.assertFalse(payload["remote_tag_exists"])
+            self.assertTrue(payload["remote_tag_exists"])
 
     def test_stable_mode_uses_stable_package_tag(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

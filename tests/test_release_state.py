@@ -8,7 +8,7 @@ import unittest
 from scripts.spm import release_state
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 RELEASE_STATE_SCRIPT = REPO_ROOT / "scripts" / "spm" / "release_state.py"
 
 
@@ -40,12 +40,12 @@ class ReleaseStateTests(unittest.TestCase):
         message: str,
     ) -> str:
         package_path = repo_root / "Package.swift"
-        metadata_path = repo_root / "scripts" / "spm" / "current_release.json"
+        metadata_path = repo_root / "config" / "current_release.json"
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
         package_path.write_text(package_contents)
         metadata_path.write_text(current_release_contents)
         subprocess.run(
-            ["git", "add", "Package.swift", "scripts/spm/current_release.json"],
+            ["git", "add", "Package.swift", "config/current_release.json"],
             cwd=repo_root,
             check=True,
             capture_output=True,
@@ -202,6 +202,67 @@ class ReleaseStateTests(unittest.TestCase):
             self.assertEqual(payload["final_package_tag"], "14.0.20261008-alpha.2")
             self.assertFalse(payload["remote_tag_exists"])
             self.assertEqual(payload["remote_tag_commit"], "")
+
+    def test_publication_script_advances_alpha_when_checksum_or_url_differs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repo_root = Path(temporary_directory)
+            self._init_git_repo(repo_root)
+            tagged_manifest = (
+                '// swift-tools-version: 6.0\n'
+                'import PackageDescription\n'
+                'let package = Package(name: "OpenFOAM-14", targets: [\n'
+                '    .binaryTarget(name: "OpenFOAM", url: "https://github.com/SPMForge/OpenFOAM-14/releases/download/14.0.20261008-alpha.1/OpenFOAM-14-apple.xcframework.zip", checksum: "1111111111111111111111111111111111111111111111111111111111111111")\n'
+                '])\n'
+            )
+            commit_sha = self._commit_package(repo_root, tagged_manifest, "release alpha.1")
+            subprocess.run(
+                ["git", "tag", "14.0.20261008-alpha.1", commit_sha],
+                cwd=repo_root,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            rendered_manifest = (
+                '// swift-tools-version: 6.0\n'
+                'import PackageDescription\n'
+                'let package = Package(name: "OpenFOAM-14", targets: [\n'
+                '    .binaryTarget(name: "OpenFOAM", url: "https://github.com/SPMForge/OpenFOAM-14/releases/download/14.0.20261008-alpha.2/OpenFOAM-14-apple.xcframework.zip", checksum: "2222222222222222222222222222222222222222222222222222222222222222")\n'
+                '])\n'
+            )
+            rendered_path = repo_root / "rendered-Package.swift"
+            rendered_path.write_text(rendered_manifest)
+
+            output_path = repo_root / "github-output.txt"
+            process = subprocess.run(
+                [
+                    sys.executable,
+                    str(RELEASE_STATE_SCRIPT),
+                    "select-publication-tag",
+                    "--repo-root",
+                    str(repo_root),
+                    "--release-channel",
+                    "alpha",
+                    "--build-tag",
+                    "14.0.20261008-alpha.1",
+                    "--latest-package-tag",
+                    "14.0.20261008-alpha.1",
+                    "--next-package-tag",
+                    "14.0.20261008-alpha.2",
+                    "--rendered-package-swift",
+                    str(rendered_path),
+                    "--github-output",
+                    str(output_path),
+                ],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            payload = json.loads(process.stdout)
+            self.assertEqual(payload["final_package_tag"], "14.0.20261008-alpha.2")
+            self.assertFalse(payload["package_contract_matches"])
 
 
 if __name__ == "__main__":

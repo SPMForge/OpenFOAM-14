@@ -51,9 +51,21 @@ let package = Package(
     ],
     products: [
         .executable(name: "Smoke", targets: ["Smoke"]),
+        .executable(name: "SmokeSwift", targets: ["SmokeSwift"]),
     ],
     targets: [
         .binaryTarget(name: "{variant.target_name}", path: "{staged_xcframework_path}"),
+        .executableTarget(
+            name: "SmokeSwift",
+            dependencies: ["{variant.target_name}"],
+            path: "SmokeSwift",
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-rpath", "-Xlinker", "@loader_path",
+                    "-Xlinker", "-rpath", "-Xlinker", "@loader_path/PackageFrameworks",
+                ]),
+            ]
+        ),
         .executableTarget(
             name: "Smoke",
             dependencies: ["{variant.target_name}"],
@@ -68,6 +80,32 @@ let package = Package(
     ],
     cxxLanguageStandard: .cxx17
 )
+"""
+
+    main_swift = """import Foundation
+import OpenFOAM
+
+let vec = foam_vector_make(3.0, 4.0, 0.0)
+let mag = foam_vector_magnitude(vec)
+guard abs(mag - 5.0) < 1e-9 else {
+    fputs("error: OpenFOAM vector magnitude calculation error: \\(mag)\\n", stderr)
+    exit(1)
+}
+
+var viscosity: Double = 0.0
+let dict = "nu 0.015;\\n"
+let status = foam_dictionary_lookup_scalar(dict, "nu", &viscosity)
+guard status == 0, abs(viscosity - 0.015) < 1e-9 else {
+    fputs("error: OpenFOAM dictionary lookup failed: status=\\(status), nu=\\(viscosity)\\n", stderr)
+    exit(2)
+}
+
+guard let verPtr = foam_version_string() else {
+    fputs("error: OpenFOAM version string null\\n", stderr)
+    exit(3)
+}
+let ver = String(cString: verPtr)
+print("✅ [Swift SPM Consumer] OpenFOAM verified! Version: \\(ver), mag: \\(mag), nu: \\(viscosity)")
 """
 
     main_cpp = """#include <OpenFOAM/OpenFOAM.h>
@@ -96,7 +134,9 @@ int main()
 """
 
     (package_root / "Smoke").mkdir(parents=True, exist_ok=True)
+    (package_root / "SmokeSwift").mkdir(parents=True, exist_ok=True)
     (package_root / "Package.swift").write_text(package_swift)
+    (package_root / "SmokeSwift" / "main.swift").write_text(main_swift)
     (package_root / "Smoke" / "main.cpp").write_text(main_cpp)
 
 
@@ -117,7 +157,7 @@ def main() -> int:
             [
                 "xcodebuild",
                 "-scheme",
-                "OpenFOAMSmoke",
+                "OpenFOAMSmoke-Package",
                 "-configuration",
                 "Release",
                 "-destination",
@@ -127,7 +167,8 @@ def main() -> int:
             ],
             cwd=package_root,
         )
-        _run(["swift", "run", "-c", "debug", "Smoke"], cwd=package_root)
+        _run(["swift", "run", "-c", "release", "SmokeSwift"], cwd=package_root)
+        _run(["swift", "run", "-c", "release", "Smoke"], cwd=package_root)
 
     return 0
 

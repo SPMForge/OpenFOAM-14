@@ -178,7 +178,7 @@ def _render_release_metadata(
     repo: str,
     package_tag_override: str | None,
 ) -> Path:
-    current_release_json = package_root / "scripts" / "spm" / "current_release.json"
+    current_release_json = package_root / "config" / "current_release.json"
     command = [
         sys.executable,
         str(packaging.SCRIPTS_ROOT / "render_package.py"),
@@ -288,11 +288,25 @@ let package = Package(
     ],
     products: [
         .executable(name: "Smoke", targets: ["Smoke"]),
+        .executable(name: "SmokeSwift", targets: ["SmokeSwift"]),
     ],
     dependencies: [
         .package(name: "{package_name}", path: "{local_package_relative_path}"),
     ],
     targets: [
+        .executableTarget(
+            name: "SmokeSwift",
+            dependencies: [
+                .product(name: "{release_input.build_metadata.release_asset.variant.product_name}", package: "{package_name}"),
+            ],
+            path: "SmokeSwift",
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-rpath", "-Xlinker", "@loader_path",
+                    "-Xlinker", "-rpath", "-Xlinker", "@loader_path/PackageFrameworks",
+                ]),
+            ]
+        ),
         .executableTarget(
             name: "Smoke",
             dependencies: [
@@ -311,6 +325,33 @@ let package = Package(
 )
 """
 
+    main_swift = """import Foundation
+import OpenFOAM
+
+// Consumes public umbrella surface <OpenFOAM/OpenFOAM.h> via Swift module import
+let vec = foam_vector_make(3.0, 4.0, 0.0)
+let mag = foam_vector_magnitude(vec)
+guard abs(mag - 5.0) < 1e-9 else {
+    fputs("error: OpenFOAM vector magnitude calculation error: \\(mag)\\n", stderr)
+    exit(1)
+}
+
+var viscosity: Double = 0.0
+let dict = "nu 0.015;\\n"
+let status = foam_dictionary_lookup_scalar(dict, "nu", &viscosity)
+guard status == 0, abs(viscosity - 0.015) < 1e-9 else {
+    fputs("error: OpenFOAM dictionary lookup failed: status=\\(status), nu=\\(viscosity)\\n", stderr)
+    exit(2)
+}
+
+guard let verPtr = foam_version_string() else {
+    fputs("error: OpenFOAM version string null\\n", stderr)
+    exit(3)
+}
+let ver = String(cString: verPtr)
+print("✅ [Swift SPM Consumer] OpenFOAM verified! Version: \\(ver), mag: \\(mag), nu: \\(viscosity)")
+"""
+
     main_cpp = """#include <OpenFOAM/OpenFOAM.h>
 
 int main()
@@ -324,7 +365,10 @@ int main()
 }
 """
 
+    (consumer_root / "Smoke").mkdir(parents=True, exist_ok=True)
+    (consumer_root / "SmokeSwift").mkdir(parents=True, exist_ok=True)
     (consumer_root / "Package.swift").write_text(package_swift)
+    (consumer_root / "SmokeSwift" / "main.swift").write_text(main_swift)
     (consumer_root / "Smoke" / "main.cpp").write_text(main_cpp)
     return consumer_package_name
 
@@ -351,7 +395,7 @@ def _validate_local_package_consumers(
                 [
                     "xcodebuild",
                     "-scheme",
-                    consumer_package_name,
+                    f"{consumer_package_name}-Package",
                     "-configuration",
                     "Release",
                     "-destination",
@@ -361,6 +405,8 @@ def _validate_local_package_consumers(
                 ],
                 cwd=consumer_root,
             )
+            _run(["swift", "run", "-c", "release", "SmokeSwift"], cwd=consumer_root)
+            _run(["swift", "run", "-c", "release", "Smoke"], cwd=consumer_root)
 
 
 def main(argv: list[str] | None = None) -> int:

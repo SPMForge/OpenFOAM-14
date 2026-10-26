@@ -10,12 +10,12 @@ from scripts.spm import packaging
 from scripts.spm import preflight_apple_platforms
 from scripts.spm import render_package
 from scripts.spm import smoke_test_package
-from scripts.spm import verify_sop_conformance
+from scripts import verify_sop_conformance
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_SWIFT_PATH = REPO_ROOT / "Package.swift"
-CURRENT_RELEASE_METADATA_PATH = REPO_ROOT / "scripts" / "spm" / "current_release.json"
+CURRENT_RELEASE_METADATA_PATH = REPO_ROOT / "config" / "current_release.json"
 SMOKE_TEST_PATH = REPO_ROOT / "scripts" / "spm" / "smoke_test_package.py"
 
 

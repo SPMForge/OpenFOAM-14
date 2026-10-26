@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -10,8 +11,13 @@ import sys
 import tempfile
 
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts import release_inputs
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONTRACT_PATH = Path(__file__).resolve().with_name("source_acquisition.json")
+DEFAULT_CONTRACT_PATH = REPO_ROOT / "config" / "source_acquisition.json"
 
 
 def _load_contract(contract_path: Path) -> dict[str, str]:
@@ -32,7 +38,7 @@ def _load_contract(contract_path: Path) -> dict[str, str]:
 
 
 def _contract_for_repo(repo_root: Path, contract_override: Path | None) -> tuple[Path, dict[str, str]]:
-    contract_path = contract_override or (repo_root / "scripts" / "spm" / "source_acquisition.json")
+    contract_path = contract_override or (repo_root / "config" / "source_acquisition.json")
     return contract_path, _load_contract(contract_path)
 
 
@@ -137,7 +143,7 @@ def _fetch_tags(repo_root: Path, contract_override: Path | None) -> None:
     ref_prefix = contract["upstream_tag_ref_prefix"]
 
     try:
-        subprocess.run(
+        remote = subprocess.run(
             ["git", "remote", "get-url", remote_name],
             cwd=repo_root,
             check=True,
@@ -146,14 +152,20 @@ def _fetch_tags(repo_root: Path, contract_override: Path | None) -> None:
         )
     except subprocess.CalledProcessError:
         _run(["git", "remote", "add", remote_name, upstream_url], cwd=repo_root)
+    else:
+        if remote.stdout.strip() != upstream_url:
+            _run(["git", "remote", "set-url", remote_name, upstream_url], cwd=repo_root)
 
-    _run(["git", "fetch", remote_name, f"refs/tags/*:{ref_prefix}/*"], cwd=repo_root)
+    _run(["git", "fetch", "--no-tags", remote_name, f"refs/tags/*:{ref_prefix}/*"], cwd=repo_root)
 
 
 def _export_source(repo_root: Path, contract_override: Path | None, upstream_tag: str, destination: Path) -> None:
     _, contract = _contract_for_repo(repo_root, contract_override)
     ref_prefix = contract["upstream_tag_ref_prefix"]
     ref_name = f"{ref_prefix}/{upstream_tag}"
+    expected = os.environ.get("SPMFORGE_EXPECTED_UPSTREAM_COMMIT")
+    if expected:
+        ref_name = release_inputs.resolve_source(repo_root, upstream_tag, expected)
     destination = destination.resolve()
     sparse_image_path = destination.parent / f"{destination.name}.sparseimage"
 

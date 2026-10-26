@@ -8,9 +8,10 @@ import re
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_ROOT = REPO_ROOT / "scripts" / "spm"
+CONFIG_ROOT = REPO_ROOT / "config"
 TOOLCHAIN_FILE = REPO_ROOT / "toolchains" / "ios.toolchain.cmake"
-CURRENT_RELEASE_METADATA_PATH = SCRIPTS_ROOT / "current_release.json"
-PLATFORM_METADATA_PATH = SCRIPTS_ROOT / "platforms.json"
+CURRENT_RELEASE_METADATA_PATH = CONFIG_ROOT / "current_release.json"
+PLATFORM_METADATA_PATH = CONFIG_ROOT / "platforms.json"
 DEFAULT_OWNER = "SPMForge"
 DEFAULT_REPO = "OpenFOAM-14"
 DEFAULT_PACKAGE_NAME = "OpenFOAM-14"

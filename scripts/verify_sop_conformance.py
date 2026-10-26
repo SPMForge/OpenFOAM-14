@@ -6,9 +6,11 @@ import re
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
-PRODUCTION_SCRIPT_PATHS = tuple(sorted((REPO_ROOT / "scripts" / "spm").glob("*.py")))
+PRODUCTION_SCRIPT_PATHS = tuple(sorted((REPO_ROOT / "scripts" / "spm").glob("*.py"))) + (
+    REPO_ROOT / "scripts" / "verify_sop_conformance.py",
+)
 PRODUCTION_WORKFLOW_PATHS = (
     REPO_ROOT / ".github" / "workflows" / "_publish-upstream-release-core.yml",
     REPO_ROOT / ".github" / "workflows" / "validate-apple-release-pipeline.yml",
@@ -30,11 +32,11 @@ def read_text(path: Path) -> str:
 
 
 def _load_platform_deployment_targets(repo_root: Path) -> dict[str, str]:
-    payload = json.loads(read_text(repo_root / "scripts" / "spm" / "platforms.json"))
+    payload = json.loads(read_text(repo_root / "config" / "platforms.json"))
     package_platforms = payload.get("package_platforms")
     require(
         isinstance(package_platforms, dict),
-        f"invalid platform metadata in {repo_root / 'scripts' / 'spm' / 'platforms.json'}",
+        f"invalid platform metadata in {repo_root / 'config' / 'platforms.json'}",
     )
     return {str(key): str(value) for key, value in package_platforms.items()}
 
@@ -62,7 +64,7 @@ def _assert_license_conformance(repo_root: Path) -> None:
 
     core_workflow = read_text(repo_root / ".github" / "workflows" / "_publish-upstream-release-core.yml")
     require("OpenFOAM-14-${{ needs.resolve.outputs.upstream_tag }}-source.tar.gz" in core_workflow, "workflow must archive and publish source.tar.gz")
-    require("*.source.tar.gz" in core_workflow, "workflow must upload source tarball artifact")
+    require("*-source.tar.gz" in core_workflow, "workflow must upload source tarball artifact")
 
     release_state_script = read_text(repo_root / "scripts" / "spm" / "release_state.py")
     require("packaging.source_asset_name" in release_state_script, "release_state.py must include source tarball in required release assets")
@@ -80,7 +82,7 @@ def _assert_no_hardcoded_deployment_targets(repo_root: Path, file_paths: tuple[P
                 require(
                     _DEPLOYMENT_TARGET_CONTEXT_PATTERN.search(line) is None,
                     "deployment target "
-                    f"{deployment_target} must stay centralized in scripts/spm/platforms.json; "
+                    f"{deployment_target} must stay centralized in config/platforms.json; "
                     f"found hardcoded value in {path}",
                 )
 
@@ -135,7 +137,7 @@ def main(repo_root: Path = REPO_ROOT) -> int:
         "manual workflow must expose an explicit stable-only default-branch publish choice",
     )
     require("--latest=false" in core_workflow, "alpha publishes must force latest=false")
-    require("gh release upload" in core_workflow, "publish core must support repair uploads")
+    require("scripts/upload_release_assets.py" in core_workflow, "publish core must support repair uploads")
     require("gh api --method PATCH" in core_workflow, "publish core must normalize release metadata")
     require("select-publication-tag" in core_workflow, "publish core must resolve final alpha tags from rendered manifests")
     require("git switch --detach" in core_workflow, "publish core must create generated metadata commits off the default branch")
@@ -215,6 +217,25 @@ def main(repo_root: Path = REPO_ROOT) -> int:
         "final package-contract validation must compile the OpenFOAM public umbrella header",
     )
     require(
+        "SmokeSwift" in validate_package_contract_script
+        and '"swift", "run"' in validate_package_contract_script
+        and "@loader_path/PackageFrameworks" in validate_package_contract_script
+        and "-Package" in validate_package_contract_script,
+        "final package-contract validation must execute pure Swift consumer SmokeSwift via swift run with @loader_path rpaths and -Package scheme",
+    )
+    require(
+        'umbrella "../Headers"' not in build_script,
+        "framework module.modulemap must not use broken relative umbrella '../Headers'",
+    )
+    require(
+        "restore-homebrew-download-cache" not in core_workflow and "HOMEBREW_CACHE" not in core_workflow,
+        "publish core must not cache HOMEBREW_CACHE to prevent runner symlink poisoning",
+    )
+    require(
+        "restore-homebrew-download-cache" not in validate_workflow and "HOMEBREW_CACHE" not in validate_workflow,
+        "validate workflow must not cache HOMEBREW_CACHE to prevent runner symlink poisoning",
+    )
+    require(
         "Runtime contract record" in release_document
         and "model: `system-only`" in release_document,
         "release documentation must record the OpenFOAM runtime dependency contract",
@@ -226,14 +247,26 @@ def main(repo_root: Path = REPO_ROOT) -> int:
         PRODUCTION_SCRIPT_PATHS + PRODUCTION_WORKFLOW_PATHS,
     )
 
-    source_acquisition = json.loads(read_text(repo_root / "scripts" / "spm" / "source_acquisition.json"))
+    source_acquisition = json.loads(read_text(repo_root / "config" / "source_acquisition.json"))
     require(
         source_acquisition.get("upstream_tag_ref_prefix") == "refs/upstream-tags",
         "source acquisition contract must fetch into refs/upstream-tags",
     )
-    require((repo_root / "scripts" / "spm" / "platforms.json").exists(), "platform metadata must exist")
-    require((repo_root / "scripts" / "spm" / "current_release.json").exists(), "release metadata must exist")
+    require((repo_root / "config" / "platforms.json").exists(), "platform metadata must exist in config/")
+    require((repo_root / "config" / "current_release.json").exists(), "release metadata must exist in config/")
+    require((repo_root / "scripts" / "verify_sop_conformance.py").exists(), "SOP gate must live at scripts/verify_sop_conformance.py")
+    require((repo_root / "tests").is_dir() and any((repo_root / "tests").glob("test_*.py")), "unit tests must live in top-level tests/")
+    require(not (repo_root / "scripts" / "spm" / "tests").exists() and not (repo_root / "scripts" / "tests").exists(), "tests must not be nested under scripts/")
+    require((repo_root / "docs" / "how-to-build" / "swiftpm-binary-package.md").exists(), "build docs must exist under docs/how-to-build/")
     _assert_license_conformance(repo_root)
+
+    publication_text = (REPO_ROOT / ".github/workflows/_publish-upstream-release-core.yml").read_text()
+    require((REPO_ROOT / "scripts/release_inputs.py").is_file(), "immutable release input helper is required")
+    require("scripts/release_inputs.py capture" in publication_text, "publish core must record immutable release inputs")
+    require("SPMFORGE_EXPECTED_UPSTREAM_COMMIT" in publication_text, "build must pin the resolved upstream commit")
+    require("config/release-inputs.json" in publication_text, "package tags must own release input metadata")
+    require("group: spm-package-publication-${{ github.repository }}" in publication_text, "scheduled and manual publication must share a repository lock")
+    require("--clobber" not in publication_text, "publish repair must not overwrite existing assets")
 
     print("OpenFOAM-14 SOP conformance verified")
     return 0

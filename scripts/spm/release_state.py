@@ -10,6 +10,7 @@ import sys
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from scripts import release_inputs
 from scripts.spm import packaging
 
 
@@ -64,6 +65,37 @@ def _rev_parse(repo_root: Path, ref_name: str) -> str:
     return process.stdout.strip()
 
 
+def repo_has_changes_since_tag(repo_root: Path, tag: str) -> bool:
+    tag_rev = subprocess.run(
+        ["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"],
+        check=False,
+        cwd=repo_root,
+        capture_output=True,
+    )
+    if tag_rev.returncode != 0:
+        return True
+
+    diff_cmd = [
+        "git",
+        "diff",
+        "--quiet",
+        f"refs/tags/{tag}",
+        "HEAD",
+        "--",
+        ".",
+        ":(exclude)Package.swift",
+        ":(exclude)config/current_release.json",
+        ":(exclude)scripts/spm/current_release.json",
+    ]
+    completed = subprocess.run(
+        diff_cmd,
+        check=False,
+        cwd=repo_root,
+        capture_output=True,
+    )
+    return completed.returncode != 0
+
+
 def inspect_release_state(
     *,
     package_tag: str,
@@ -72,6 +104,7 @@ def inspect_release_state(
     tag_exists: bool,
     release_view: dict[str, object] | None,
     latest_release_tag: str | None,
+    repo_root: Path = packaging.REPO_ROOT,
 ) -> dict[str, object]:
     if release_channel not in {"sync", "alpha", "stable"}:
         raise ValueError(f"unsupported release channel: {release_channel}")
@@ -106,9 +139,9 @@ def inspect_release_state(
     metadata_needs_repair = False
     if release_exists:
         if expected_prerelease:
-            metadata_needs_repair = (not release_is_prerelease) or release_is_latest
+            metadata_needs_repair = (not release_is_prerelease) or release_is_latest or bool(release_view.get("isDraft", False))
         else:
-            metadata_needs_repair = release_is_prerelease
+            metadata_needs_repair = release_is_prerelease or bool(release_view.get("isDraft", False))
 
     if not tag_exists:
         mode = "create"
@@ -116,6 +149,10 @@ def inspect_release_state(
         mode = "repair"
     else:
         mode = "skip"
+
+    if mode == "repair" and release_exists and not missing_assets and metadata_needs_repair:
+        if release_inputs.tag_inputs_match(repo_root, package_tag) is True:
+            mode = "metadata"
 
     return {
         "package_tag": package_tag,
@@ -153,9 +190,12 @@ def select_publication_tag(
     contract_matches = True
 
     def _latest_package_matches(tag: str) -> bool:
+        if release_inputs.tag_inputs_match(repo_root, tag) is False:
+            return False
         latest_package_swift = _git_show(repo_root, f"refs/tags/{tag}", "Package.swift")
         if latest_package_swift is None:
             return False
+
         if latest_package_swift != rendered_package_swift:
             return False
         if rendered_current_release_json is None:
@@ -163,8 +203,14 @@ def select_publication_tag(
         latest_current_release_json = _git_show(
             repo_root,
             f"refs/tags/{tag}",
-            "scripts/spm/current_release.json",
+            "config/current_release.json",
         )
+        if latest_current_release_json is None:
+            latest_current_release_json = _git_show(
+                repo_root,
+                f"refs/tags/{tag}",
+                "scripts/spm/current_release.json",
+            )
         return latest_current_release_json == rendered_current_release_json
 
     if release_channel in {"sync", "alpha"}:
@@ -212,6 +258,8 @@ def _parse_arguments() -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     inspect_parser = subparsers.add_parser("inspect-release", help="Inspect whether a package tag should be created, repaired, or skipped.")
+    inspect_parser.add_argument("--github-repository")
+    inspect_parser.add_argument("--repo-root", type=Path, default=packaging.REPO_ROOT)
     inspect_parser.add_argument("--package-tag", required=True)
     inspect_parser.add_argument("--upstream-tag", required=True)
     inspect_parser.add_argument("--release-channel", required=True)
@@ -240,13 +288,18 @@ def main() -> int:
 
     try:
         if arguments.command == "inspect-release":
+            release_view = _load_release_view(arguments.release_view_json)
+            latest_release_tag = arguments.latest_release_tag
+            if arguments.github_repository:
+                release_view, latest_release_tag = release_inputs.read_release_state(arguments.github_repository, arguments.package_tag)
             payload = inspect_release_state(
                 package_tag=arguments.package_tag,
                 upstream_tag=arguments.upstream_tag,
                 release_channel=arguments.release_channel,
                 tag_exists=arguments.tag_exists,
-                release_view=_load_release_view(arguments.release_view_json),
-                latest_release_tag=arguments.latest_release_tag,
+                release_view=release_view,
+                latest_release_tag=latest_release_tag,
+                repo_root=arguments.repo_root,
             )
         elif arguments.command == "select-publication-tag":
             payload = select_publication_tag(
@@ -264,7 +317,7 @@ def main() -> int:
             )
         else:
             raise ValueError(f"unsupported command: {arguments.command}")
-    except (FileNotFoundError, ValueError, json.JSONDecodeError) as error:
+    except (FileNotFoundError, ValueError, RuntimeError, json.JSONDecodeError) as error:
         print(str(error), file=sys.stderr)
         return 1
 

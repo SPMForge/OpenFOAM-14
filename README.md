@@ -14,7 +14,7 @@ It does not carry the upstream C++ source tree on the default branch. Instead, t
 - `macOS` (`arm64`, `x86_64`), minimum deployment target `12.0`
 - `Mac Catalyst` (`arm64`, `x86_64`), minimum deployment target `15.0`
 - `tvOS` (`arm64`) and `tvOS Simulator` (`arm64`, `x86_64`), minimum deployment target `15.0`
-- `watchOS` (`arm64_32`) and `watchOS Simulator` (`arm64`, `x86_64`), minimum deployment target `9.0`
+- `watchOS` (`arm64`, `arm64_32`) and `watchOS Simulator` (`arm64`, `x86_64`), minimum deployment target `9.0`
 - `visionOS` (`arm64`) and `visionOS Simulator` (`arm64`, `x86_64`), minimum deployment target `1.0`
 
 ## Consumer Usage

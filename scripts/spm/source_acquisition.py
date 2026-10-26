@@ -65,10 +65,10 @@ def _ref_has_case_collisions(repo_root: Path, ref_name: str) -> bool:
     return len(paths) != len({path.lower() for path in paths})
 
 
-def _detach_sparse_image_if_mounted(destination: Path, sparse_image_path: Path, cwd: Path) -> None:
-    if sys.platform == "darwin" and shutil.which("hdiutil") and destination.exists():
+def _detach_sparse_image_if_mounted(volume_mount: Path, sparse_image_path: Path, cwd: Path) -> None:
+    if sys.platform == "darwin" and shutil.which("hdiutil") and volume_mount.exists():
         subprocess.run(
-            ["hdiutil", "detach", str(destination), "-force"],
+            ["hdiutil", "detach", str(volume_mount), "-force"],
             cwd=cwd,
             check=False,
             capture_output=True,
@@ -78,11 +78,11 @@ def _detach_sparse_image_if_mounted(destination: Path, sparse_image_path: Path, 
         sparse_image_path.unlink()
 
 
-def _mount_case_sensitive_sparse_image(destination: Path, sparse_image_path: Path, cwd: Path) -> None:
-    _detach_sparse_image_if_mounted(destination, sparse_image_path, cwd)
-    if destination.exists():
-        shutil.rmtree(destination)
-    destination.mkdir(parents=True, exist_ok=True)
+def _mount_case_sensitive_sparse_image(volume_mount: Path, sparse_image_path: Path, cwd: Path) -> None:
+    _detach_sparse_image_if_mounted(volume_mount, sparse_image_path, cwd)
+    if volume_mount.exists():
+        shutil.rmtree(volume_mount)
+    volume_mount.mkdir(parents=True, exist_ok=True)
 
     _run(
         [
@@ -106,7 +106,7 @@ def _mount_case_sensitive_sparse_image(destination: Path, sparse_image_path: Pat
             "attach",
             str(sparse_image_path),
             "-mountpoint",
-            str(destination),
+            str(volume_mount),
             "-nobrowse",
         ],
         cwd=cwd,
@@ -183,6 +183,19 @@ def _export_source(repo_root: Path, contract_override: Path | None, upstream_tag
         and _ref_has_case_collisions(repo_root, ref_name)
     ):
         _mount_case_sensitive_sparse_image(destination, sparse_image_path, repo_root)
+        archive_proc = subprocess.Popen(
+            ["git", "archive", "--format=tar", ref_name],
+            cwd=repo_root,
+            stdout=subprocess.PIPE,
+        )
+        assert archive_proc.stdout is not None
+        try:
+            subprocess.run(["tar", "-xf", "-", "-C", str(destination)], stdin=archive_proc.stdout, check=True)
+        finally:
+            archive_proc.stdout.close()
+            if archive_proc.wait() != 0:
+                raise subprocess.CalledProcessError(archive_proc.returncode, ["git", "archive", "--format=tar", ref_name])
+        return
 
     _run(["git", "worktree", "add", "--detach", str(destination), ref_name], cwd=repo_root)
     _run(["git", "submodule", "update", "--init", "--recursive"], cwd=destination)

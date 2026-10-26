@@ -86,6 +86,15 @@ class PlatformMatrixTests(unittest.TestCase):
             ],
         )
 
+    def test_all_variant_cmake_platforms_are_supported_by_ios_toolchain(self) -> None:
+        toolchain_text = packaging.TOOLCHAIN_FILE.read_text(encoding="utf-8")
+        for platform in packaging.OPENFOAM_VARIANT.platforms:
+            self.assertIn(
+                f'"{platform.cmake_platform}"',
+                toolchain_text,
+                f"cmake_platform {platform.cmake_platform} for {platform.swiftpm_platform} is not supported in ios.toolchain.cmake",
+            )
+
 
 class PackageRenderingTests(unittest.TestCase):
     def test_renders_binary_target_for_openfoam_product(self) -> None:

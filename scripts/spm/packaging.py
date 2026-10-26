@@ -99,21 +99,21 @@ COMMON_PLATFORMS = (
     ),
     Platform(
         swiftpm_platform="ios-simulator",
-        cmake_platform="SIMULATOR64",
+        cmake_platform="SIMULATORARM64",
         xcode_destination="generic/platform=iOS Simulator",
         archs=("arm64", "x86_64"),
         deployment_target=PACKAGE_PLATFORM_DEPLOYMENT_TARGETS["ios"],
     ),
     Platform(
         swiftpm_platform="macos",
-        cmake_platform="MAC_UNIVERSAL",
+        cmake_platform="MAC",
         xcode_destination="generic/platform=macOS",
         archs=("arm64", "x86_64"),
         deployment_target=PACKAGE_PLATFORM_DEPLOYMENT_TARGETS["macos"],
     ),
     Platform(
         swiftpm_platform="ios-maccatalyst",
-        cmake_platform="MAC_CATALYST_UNIVERSAL",
+        cmake_platform="MAC_CATALYST",
         xcode_destination="generic/platform=macOS,variant=Mac Catalyst",
         archs=("arm64", "x86_64"),
         deployment_target=PACKAGE_PLATFORM_DEPLOYMENT_TARGETS["ios-maccatalyst"],
@@ -127,7 +127,7 @@ COMMON_PLATFORMS = (
     ),
     Platform(
         swiftpm_platform="tvos-simulator",
-        cmake_platform="SIMULATOR_TVOS",
+        cmake_platform="SIMULATORARM64_TVOS",
         xcode_destination="generic/platform=tvOS Simulator",
         archs=("arm64", "x86_64"),
         deployment_target=PACKAGE_PLATFORM_DEPLOYMENT_TARGETS["tvos"],
@@ -136,7 +136,7 @@ COMMON_PLATFORMS = (
         swiftpm_platform="watchos",
         cmake_platform="WATCHOS",
         xcode_destination="generic/platform=watchOS",
-        archs=("arm64_32",),
+        archs=("arm64", "arm64_32"),
         deployment_target=PACKAGE_PLATFORM_DEPLOYMENT_TARGETS["watchos"],
     ),
     Platform(

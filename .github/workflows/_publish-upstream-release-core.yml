@@ -1,12 +1,11 @@
 name: _publish-upstream-release-core
-
-on:
+'on':
   workflow_call:
     inputs:
       upstream_tag:
         required: false
         type: string
-        default: ""
+        default: ''
       release_channel:
         required: true
         type: string
@@ -14,15 +13,25 @@ on:
         required: false
         type: boolean
         default: false
-
 permissions:
-  contents: write
-
+  contents: read
 concurrency:
   group: spm-package-publication-${{ github.repository }}
   cancel-in-progress: false
-
 jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Verify packaging logic and SOP conformance
+        run: |
+          python3 scripts/verify_sop_conformance.py
+          python3 -m unittest discover -s tests -p "test_*.py"
   resolve:
     runs-on: ubuntu-latest
     outputs:
@@ -42,11 +51,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.x"
-      - name: Verify packaging logic and SOP conformance
-        run: |
-          python3 scripts/verify_sop_conformance.py
-          python3 -m unittest discover -s tests -p "test_*.py"
+          python-version: 3.x
       - name: Fetch upstream tags
         run: python3 scripts/spm/source_acquisition.py fetch-tags
       - name: Fetch existing package tags
@@ -68,7 +73,6 @@ jobs:
         id: release_inputs
         run: |
           python3 scripts/release_inputs.py capture --upstream-tag "${{ steps.resolve.outputs.upstream_tag }}" --github-output "$GITHUB_OUTPUT"
-
       - name: Inspect existing release state
         id: release_status
         env:
@@ -95,9 +99,12 @@ jobs:
             --tag "${{ steps.resolve.outputs.build_tag }}" \
             --release-channel "${{ inputs.release_channel }}" \
             --github-output "$GITHUB_OUTPUT"
-
+    needs: verify
+    name: Resolve
   build:
-    needs: resolve
+    needs:
+      - verify
+      - resolve
     if: needs.resolve.outputs.release_mode != 'skip' && needs.resolve.outputs.release_mode != 'metadata'
     runs-on: macos-15
     strategy:
@@ -112,7 +119,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.x"
+          python-version: 3.x
       - name: Ensure build tools
         run: |
           missing_formulae=()
@@ -170,7 +177,7 @@ jobs:
             --upstream-tag "${{ needs.resolve.outputs.upstream_tag }}" \
             --package-tag "${{ needs.resolve.outputs.build_tag }}" \
             --source-root "${RUNNER_TEMP}/upstream-source" \
-            --output-dir "${RUNNER_TEMP}/spm-artifacts"
+            --output-dir "${RUNNER_TEMP}/spm-artifacts" --skip-smoke-test
       - name: Verify compiler cache payload
         id: verify_ccache_payload
         if: ${{ steps.restore_ccache.outcome == 'success' && steps.build_xcframework.outcome == 'success' }}
@@ -217,6 +224,8 @@ jobs:
             --source-root "$RUNNER_TEMP/upstream-source" \
             --generated-root "$RUNNER_TEMP/spm-artifacts/${{ matrix.variant }}/cmake_src" \
             --output "${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/OpenFOAM-14-${{ needs.resolve.outputs.upstream_tag }}-source.tar.gz"
+      - name: Record immutable artifact inventory
+        run: python3 scripts/ci_artifacts.py record --root "$RUNNER_TEMP/spm-artifacts/${{ matrix.variant }}"
       - name: Upload built artifacts
         id: upload-artifacts
         continue-on-error: true
@@ -228,6 +237,7 @@ jobs:
             ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/*.xcframework.zip
             ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/${{ matrix.variant }}.release.json
             ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/*-source.tar.gz
+            ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/ci-artifacts.json
       - name: Retry upload built artifacts
         id: retry-upload-artifacts
         if: steps.upload-artifacts.outcome != 'success'
@@ -239,12 +249,45 @@ jobs:
             ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/*.xcframework.zip
             ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/${{ matrix.variant }}.release.json
             ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/*-source.tar.gz
-
+            ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/ci-artifacts.json
+    name: Build (${{ matrix.variant }})
+    permissions:
+      contents: read
+    env:
+      SPMFORGE_EXPECTED_UPSTREAM_COMMIT: ${{ needs.resolve.outputs.upstream_commit }}
+      SPMFORGE_DEFER_CONSUMERS: "1"
+  consumers:
+    name: Validate Consumers (${{ matrix.variant }})
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Download final archives
+        uses: actions/download-artifact@v8
+        with:
+          name: spm-${{ matrix.variant }}
+          path: ${{ runner.temp }}/consumer-inputs
+      - name: Run Debug and Release consumers
+        run: python3 scripts/ci_artifacts.py consumers --root "$RUNNER_TEMP/consumer-inputs" --product "${{ matrix.variant }}"
+    needs:
+      - resolve
+      - build
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - OpenFOAM
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
   release:
     needs:
       - resolve
       - build
-    if: always() && needs.resolve.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped') && needs.resolve.outputs.release_mode != 'skip' && needs.resolve.outputs.release_mode != 'metadata'
+      - consumers
+    if: (always() && needs.resolve.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped') && needs.resolve.outputs.release_mode != 'skip' && needs.resolve.outputs.release_mode != 'metadata') && (needs.consumers.result == 'success' || (needs.resolve.outputs.release_mode == 'skip' && needs.consumers.result == 'skipped'))
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
@@ -253,13 +296,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.x"
+          python-version: 3.x
       - name: Fetch existing package tags
         run: git fetch origin "refs/tags/*:refs/tags/*"
       - name: Restore immutable release inputs
         run: |
           python3 scripts/release_inputs.py capture --upstream-tag "${{ needs.resolve.outputs.upstream_tag }}" --upstream-commit "${{ needs.resolve.outputs.upstream_commit }}"
-
       - name: Download OpenFOAM artifacts
         id: download-openfoam-artifacts
         continue-on-error: true
@@ -456,9 +498,11 @@ jobs:
               fi
             fi
           fi
-
+    name: Publish
+    permissions:
+      contents: write
   promote_existing_stable:
-    name: Promote existing stable metadata
+    name: Promote Stable
     needs: resolve
     if: needs.resolve.result == 'success' && needs.resolve.outputs.release_mode == 'skip' && inputs.release_channel == 'stable' && inputs.publish_to_default_branch
     runs-on: ubuntu-latest
@@ -475,9 +519,10 @@ jobs:
           git fetch origin "refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}" "refs/tags/${TARGET_VERSION}:refs/tags/${TARGET_VERSION}"
           release_commit="$(git rev-parse "refs/tags/${TARGET_VERSION}^{commit}")"
           git push origin "${release_commit}:refs/heads/${DEFAULT_BRANCH}"
-
+    permissions:
+      contents: write
   repair_existing_metadata:
-    name: Repair complete release metadata without rebuilding
+    name: Repair Metadata
     needs: resolve
     if: needs.resolve.result == 'success' && needs.resolve.outputs.release_mode == 'metadata'
     runs-on: ubuntu-latest
@@ -505,3 +550,46 @@ jobs:
             release_commit="$(git rev-parse "refs/tags/${TARGET_VERSION}^{commit}")"
             git push origin "${release_commit}:refs/heads/${DEFAULT_BRANCH}"
           fi
+    permissions:
+      contents: write
+  reuse:
+    name: Reuse
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Explain existing release reuse
+        run: echo "Input identity and complete published assets match; no build, tag or upload is required."
+    needs:
+      - verify
+      - resolve
+    if: needs.resolve.outputs.release_mode == 'skip'
+  summary:
+    name: Summary
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Report all stage results
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/ci_artifacts.py summary
+    needs:
+      - verify
+      - resolve
+      - build
+      - consumers
+      - release
+      - promote_existing_stable
+      - repair_existing_metadata
+      - reuse
+    if: always()
+defaults:
+  run:
+    shell: bash

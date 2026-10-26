@@ -167,6 +167,8 @@ def main() -> int:
             ],
             cwd=package_root,
         )
+        _run(["swift", "run", "-c", "debug", "SmokeSwift"], cwd=package_root)
+        _run(["swift", "run", "-c", "debug", "Smoke"], cwd=package_root)
         _run(["swift", "run", "-c", "release", "SmokeSwift"], cwd=package_root)
         _run(["swift", "run", "-c", "release", "Smoke"], cwd=package_root)
 

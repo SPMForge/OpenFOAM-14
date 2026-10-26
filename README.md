@@ -113,3 +113,19 @@ New releases record immutable upstream and wrapper input identity in
 policy and repository publication lock. See the
 [repeat-publication SOP](docs/how-to-build/swiftpm-binary-package.md#immutable-source-and-repeat-publication-sop)
 for source pinning, legacy tags, strict repair checks, and verification boundaries.
+
+## CI stages and package consumption
+
+Actions uses the same stage vocabulary across the wrapper repositories:
+`Verify → Resolve → Build (product) → Validate Consumers → Publish → Summary`.
+Validation runs omit publication. CPU/Vulkan products are separate branches;
+platform slices remain grouped within each build job. Consumer jobs verify archive
+transfer digests and test the final extracted XCFrameworks in Debug and Release.
+A failed consumer blocks publication. Completed matching releases use the `Reuse`
+path; metadata-only drift uses `Repair Metadata` without rebuilding.
+
+Consume an accepted **package version tag**, rather than the default branch.
+Alpha releases do not promote default-branch package metadata; a successful CI run
+alone does not establish that the default-branch binary URLs are downloadable.
+The Summary job records stage results and links to the run artifacts. Each build
+artifact inventory records upstream commit, toolchain and archive SHA-256 values.

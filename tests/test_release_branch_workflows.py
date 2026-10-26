@@ -148,7 +148,8 @@ class SourceArtifactTransferTests(unittest.TestCase):
             if helper.exists():
                 shutil.copy2(helper,wrapper/'scripts/spm/archive_source.py')
             text=PUBLISH_CORE_WORKFLOW_PATH.read_text()
-            body=text.split('      - name: Archive patched source tarball\n',1)[1].split('      - name:',1)[0].split('        run: |\n',1)[1]
+            body=__import__('json').loads(subprocess.check_output(['ruby','-ryaml','-rjson','-e','puts JSON.generate(YAML.load_file(ARGV[0]))',str(PUBLISH_CORE_WORKFLOW_PATH)],text=True))['jobs']['build']['steps']
+            body=next(step['run'] for step in body if step.get('name') == 'Archive patched source tarball')
             body='\n'.join(line[10:] if line.startswith('          ') else line for line in body.splitlines())
             body=body.replace('${{ runner.temp }}',str(root)).replace('${{ matrix.variant }}','OpenFOAM').replace('${{ needs.resolve.outputs.upstream_tag }}','20261008')
             environment=os.environ.copy()

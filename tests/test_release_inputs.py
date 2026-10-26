@@ -38,6 +38,23 @@ class ReleaseInputTests(unittest.TestCase):
         self.git('commit','-m','metadata')
         self.git('tag','1.2.3-alpha.1')
 
+    def test_identity_distinguishes_absent_legacy_invalid_matching_and_changed(self):
+        module.capture(self.root, 'v1.2.3')
+        self.assertEqual(module.tag_input_state(self.root, 'missing'), 'tag_absent')
+        self.git('tag', 'legacy')
+        self.assertEqual(module.tag_input_state(self.root, 'legacy'), 'identity_missing')
+        (self.root / module.RECORD).write_text('{invalid')
+        self.git('add', module.RECORD)
+        self.git('commit', '-m', 'invalid metadata')
+        self.git('tag', 'invalid')
+        module.capture(self.root, 'v1.2.3')
+        self.assertEqual(module.tag_input_state(self.root, 'invalid'), 'identity_invalid')
+        self.tag_record()
+        self.assertEqual(module.tag_input_state(self.root, '1.2.3-alpha.1'), 'identity_matches')
+        (self.root / 'builder.py').write_text('build = 2\n')
+        module.capture(self.root, 'v1.2.3')
+        self.assertEqual(module.tag_input_state(self.root, '1.2.3-alpha.1'), 'identity_differs')
+
     def test_same_inputs_match_despite_generated_metadata_commit(self):
         self.tag_record()
         module.capture(self.root,'v1.2.3')

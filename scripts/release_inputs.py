@@ -77,17 +77,36 @@ def capture(root: Path, tag: str, commit: str | None = None) -> dict:
     return record
 
 
-def tag_inputs_match(root: Path, tag: str) -> bool | None:
-    current = root / RECORD
-    if not current.is_file():
-        return None  # Legacy local tooling; CI must capture inputs before planning.
-    process = subprocess.run(['git', 'show', f'refs/tags/{tag}:{RECORD}'], cwd=root, capture_output=True, text=True)
+def tag_input_state(root: Path, tag: str) -> str:
+    revision = subprocess.run(['git', 'rev-parse', '--verify', f'refs/tags/{tag}^{{commit}}'],
+                              cwd=root, capture_output=True, text=True)
+    if revision.returncode:
+        return 'tag_absent'
+    process = subprocess.run(['git', 'show', f'{revision.stdout.strip()}:{RECORD}'],
+                             cwd=root, capture_output=True, text=True)
     if process.returncode:
-        return False
+        return 'identity_missing'
     try:
-        return json.loads(process.stdout) == json.loads(current.read_text())
-    except json.JSONDecodeError:
-        return False
+        recorded = json.loads(process.stdout)
+        current = json.loads((root / RECORD).read_text())
+        required = {'schema_version', 'upstream_repository', 'upstream_tag',
+                    'upstream_commit', 'wrapper_inputs_sha256'}
+        for value in (recorded, current):
+            if not isinstance(value, dict) or not required <= value.keys():
+                return 'identity_invalid'
+            if value['schema_version'] != 1 or not all(isinstance(value[key], str) and value[key] for key in required - {'schema_version'}):
+                return 'identity_invalid'
+            if re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', value['upstream_commit']) is None or re.fullmatch(r'[0-9a-f]{64}', value['wrapper_inputs_sha256']) is None:
+                return 'identity_invalid'
+    except (OSError, ValueError, TypeError):
+        return 'identity_invalid'
+    return 'identity_matches' if recorded == current else 'identity_differs'
+
+
+def tag_inputs_match(root: Path, tag: str) -> bool | None:
+    if not (root / RECORD).is_file():
+        return None  # Legacy local tooling; CI captures inputs before planning.
+    return tag_input_state(root, tag) == 'identity_matches'
 
 
 def github_json(endpoint: str) -> dict | None:

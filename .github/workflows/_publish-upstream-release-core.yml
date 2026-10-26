@@ -1,0 +1,466 @@
+name: _publish-upstream-release-core
+
+on:
+  workflow_call:
+    inputs:
+      upstream_tag:
+        required: false
+        type: string
+        default: ""
+      release_channel:
+        required: true
+        type: string
+      publish_to_default_branch:
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: openfoam-14-apple-spm-release
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      upstream_tag: ${{ steps.resolve.outputs.upstream_tag }}
+      build_tag: ${{ steps.resolve.outputs.build_tag }}
+      package_tag: ${{ steps.resolve.outputs.package_tag }}
+      latest_package_tag: ${{ steps.resolve.outputs.latest_package_tag }}
+      next_package_tag: ${{ steps.resolve.outputs.next_package_tag }}
+      remote_tag_exists: ${{ steps.resolve.outputs.remote_tag_exists }}
+      remote_tag_commit: ${{ steps.resolve.outputs.remote_tag_commit }}
+      release_mode: ${{ steps.release_status.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Verify packaging logic
+        run: |
+          python3 -m unittest \
+            scripts.spm.tests.test_spm_packaging \
+            scripts.spm.tests.test_release_flow \
+            scripts.spm.tests.test_release_state \
+            scripts.spm.tests.test_source_acquisition \
+            scripts.spm.tests.test_xcframework_validation \
+            scripts.tests.test_release_branch_workflows
+      - name: Fetch upstream tags
+        run: python3 scripts/spm/source_acquisition.py fetch-tags
+      - name: Fetch existing package tags
+        run: git fetch origin "refs/tags/*:refs/tags/*"
+      - name: Resolve upstream tag
+        id: resolve
+        run: |
+          python3 scripts/spm/select_upstream_tag.py \
+            --explicit-tag "${{ inputs.upstream_tag }}" \
+            --release-channel "${{ inputs.release_channel }}" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Validate default-branch publish policy
+        run: |
+          if [[ "${{ inputs.publish_to_default_branch }}" == "true" && "${{ inputs.release_channel }}" != "stable" ]]; then
+            echo "publish_to_default_branch is only supported for stable releases." >&2
+            exit 1
+          fi
+      - name: Inspect existing release state
+        id: release_status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_view_file="$RUNNER_TEMP/release-view.json"
+          inspect_args=(
+            scripts/spm/release_state.py
+            inspect-release
+            --package-tag "${{ steps.resolve.outputs.build_tag }}"
+            --upstream-tag "${{ steps.resolve.outputs.upstream_tag }}"
+            --release-channel "${{ inputs.release_channel }}"
+            --github-output "$GITHUB_OUTPUT"
+          )
+
+          if [[ "${{ steps.resolve.outputs.remote_tag_exists }}" == "true" ]]; then
+            inspect_args+=(--tag-exists)
+          fi
+
+          if gh release view "${{ steps.resolve.outputs.build_tag }}" \
+            --repo "${{ github.repository }}" \
+            --json isPrerelease,assets > "$release_view_file" 2>/dev/null; then
+            inspect_args+=(--release-view-json "$release_view_file")
+          fi
+
+          latest_release_tag="$(
+            gh api "repos/${{ github.repository }}/releases/latest" --jq '.tag_name' 2>/dev/null || true
+          )"
+          if [[ -n "${latest_release_tag}" ]]; then
+            inspect_args+=(--latest-release-tag "${latest_release_tag}")
+          fi
+
+          python3 "${inspect_args[@]}"
+
+  build:
+    needs: resolve
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - OpenFOAM
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Restore Homebrew download cache
+        id: restore-homebrew-download-cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.homebrew-cache
+          key: homebrew-downloads-${{ runner.os }}-${{ runner.arch }}-cmake-ccache-v1
+          restore-keys: |
+            homebrew-downloads-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install build tools
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_CACHE: ${{ github.workspace }}/.homebrew-cache
+        run: |
+          mkdir -p "$HOMEBREW_CACHE"
+          missing_formulae=()
+          for formula in cmake ccache; do
+            if ! command -v "$formula" >/dev/null 2>&1; then
+              missing_formulae+=("$formula")
+            fi
+          done
+          if (( ${#missing_formulae[@]} > 0 )); then
+            brew install "${missing_formulae[@]}"
+          fi
+      - name: Resolve Xcode version
+        id: xcode
+        run: |
+          version_line="$(xcodebuild -version | tr '\n' '-' | tr ' ' '_' | sed 's/-$//')"
+          echo "version_key=${version_line}" >> "$GITHUB_OUTPUT"
+      - name: Preflight Apple platforms
+        id: preflight-apple-platforms
+        run: |
+          python3 scripts/spm/preflight_apple_platforms.py \
+            --variant "${{ matrix.variant }}"
+      - name: Restore compiler cache
+        id: restore_ccache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version_key }}-${{ matrix.variant }}-${{ hashFiles('scripts/spm/build_apple_xcframework.py', 'scripts/spm/archive_builder.py', 'scripts/spm/packaging.py', 'scripts/spm/platforms.json', 'toolchains/ios.toolchain.cmake') }}-${{ needs.resolve.outputs.upstream_tag }}
+          restore-keys: |
+            ccache-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version_key }}-${{ matrix.variant }}-${{ hashFiles('scripts/spm/build_apple_xcframework.py', 'scripts/spm/archive_builder.py', 'scripts/spm/packaging.py', 'scripts/spm/platforms.json', 'toolchains/ios.toolchain.cmake') }}-
+            ccache-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version_key }}-${{ matrix.variant }}-
+      - name: Configure compiler cache
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size=5G
+          ccache --zero-stats
+      - name: Fetch upstream tags
+        run: python3 scripts/spm/source_acquisition.py fetch-tags
+      - name: Export upstream source
+        run: |
+          python3 scripts/spm/source_acquisition.py export-source \
+            --upstream-tag "${{ needs.resolve.outputs.upstream_tag }}" \
+            --destination "${RUNNER_TEMP}/upstream-source"
+      - name: Build XCFramework
+        id: build_xcframework
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: |
+          python3 scripts/spm/build_apple_xcframework.py \
+            --variant "${{ matrix.variant }}" \
+            --upstream-tag "${{ needs.resolve.outputs.upstream_tag }}" \
+            --package-tag "${{ needs.resolve.outputs.build_tag }}" \
+            --source-root "${RUNNER_TEMP}/upstream-source" \
+            --output-dir "${RUNNER_TEMP}/spm-artifacts"
+      - name: Verify compiler cache payload
+        id: verify_ccache_payload
+        if: ${{ steps.restore_ccache.outcome == 'success' && steps.build_xcframework.outcome == 'success' }}
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: |
+          cache_files="$(find "$CCACHE_DIR" -type f ! -name 'ccache.conf' -print -quit)"
+          if [[ -z "$cache_files" ]]; then
+            echo "compiler cache remained empty after build-xcframework" >&2
+            exit 1
+          fi
+      - name: Save compiler cache
+        if: ${{ steps.restore_ccache.outcome == 'success' && steps.build_xcframework.outcome == 'success' && steps.verify_ccache_payload.outcome == 'success' && steps.restore_ccache.outputs.cache-hit != 'true' && steps.restore_ccache.outputs.cache-primary-key != '' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ${{ steps.restore_ccache.outputs.cache-primary-key }}
+      - name: Validate built XCFramework archive
+        run: |
+          python3 scripts/spm/validate_mergeable_xcframework.py \
+            --require-platform ios \
+            --require-platform ios-simulator \
+            --require-platform ios-maccatalyst \
+            --require-platform macos \
+            --require-platform tvos \
+            --require-platform tvos-simulator \
+            --require-platform watchos \
+            --require-platform watchos-simulator \
+            --require-platform xros \
+            --require-platform xros-simulator \
+            "${RUNNER_TEMP}/spm-artifacts/${{ matrix.variant }}"/*.xcframework.zip
+      - name: Show compiler cache stats
+        id: build-ccache-stats
+        if: always()
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: ccache --show-stats
+      - name: Upload built artifacts
+        id: upload-artifacts
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: spm-${{ matrix.variant }}
+          overwrite: true
+          path: |
+            ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/*.xcframework.zip
+            ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/${{ matrix.variant }}.release.json
+      - name: Retry upload built artifacts
+        id: retry-upload-artifacts
+        if: steps.upload-artifacts.outcome != 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: spm-${{ matrix.variant }}
+          overwrite: true
+          path: |
+            ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/*.xcframework.zip
+            ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/${{ matrix.variant }}.release.json
+
+  release:
+    needs:
+      - resolve
+      - build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Fetch existing package tags
+        run: git fetch origin "refs/tags/*:refs/tags/*"
+      - name: Download OpenFOAM artifacts
+        id: download-openfoam-artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: spm-OpenFOAM
+          path: artifacts/OpenFOAM
+      - name: Retry download OpenFOAM artifacts
+        id: retry-download-openfoam-artifacts
+        if: steps.download-openfoam-artifacts.outcome != 'success'
+        uses: actions/download-artifact@v8
+        with:
+          name: spm-OpenFOAM
+          path: artifacts/OpenFOAM
+      - name: Validate downloaded XCFramework archives
+        run: |
+          python3 scripts/spm/validate_mergeable_xcframework.py \
+            --require-platform ios \
+            --require-platform ios-simulator \
+            --require-platform ios-maccatalyst \
+            --require-platform macos \
+            --require-platform tvos \
+            --require-platform tvos-simulator \
+            --require-platform watchos \
+            --require-platform watchos-simulator \
+            --require-platform xros \
+            --require-platform xros-simulator \
+            artifacts/OpenFOAM/OpenFOAM-14-*.xcframework.zip
+      - name: Render candidate Package.swift for publication tag selection
+        run: |
+          python3 scripts/spm/render_package.py \
+            --release-metadata artifacts/OpenFOAM/OpenFOAM.release.json \
+            --package-tag-override "${{ needs.resolve.outputs.build_tag }}" \
+            --output "$RUNNER_TEMP/candidate-Package.swift" \
+            --current-release-json "$RUNNER_TEMP/candidate-current-release.json"
+      - name: Resolve final publication tag
+        id: publication_plan
+        run: |
+          python3 scripts/spm/release_state.py \
+            select-publication-tag \
+            --repo-root . \
+            --release-channel "${{ inputs.release_channel }}" \
+            --build-tag "${{ needs.resolve.outputs.build_tag }}" \
+            --latest-package-tag "${{ needs.resolve.outputs.latest_package_tag }}" \
+            --next-package-tag "${{ needs.resolve.outputs.next_package_tag }}" \
+            --rendered-package-swift "$RUNNER_TEMP/candidate-Package.swift" \
+            --rendered-current-release-json "$RUNNER_TEMP/candidate-current-release.json" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Inspect final publication release state
+        id: release_status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_view_file="$RUNNER_TEMP/final-release-view.json"
+          inspect_args=(
+            scripts/spm/release_state.py
+            inspect-release
+            --package-tag "${{ steps.publication_plan.outputs.final_package_tag }}"
+            --upstream-tag "${{ needs.resolve.outputs.upstream_tag }}"
+            --release-channel "${{ inputs.release_channel }}"
+            --github-output "$GITHUB_OUTPUT"
+          )
+
+          if [[ "${{ steps.publication_plan.outputs.remote_tag_exists }}" == "true" ]]; then
+            inspect_args+=(--tag-exists)
+          fi
+
+          if gh release view "${{ steps.publication_plan.outputs.final_package_tag }}" \
+            --repo "${{ github.repository }}" \
+            --json isPrerelease,assets > "$release_view_file" 2>/dev/null; then
+            inspect_args+=(--release-view-json "$release_view_file")
+          fi
+
+          latest_release_tag="$(
+            gh api "repos/${{ github.repository }}/releases/latest" --jq '.tag_name' 2>/dev/null || true
+          )"
+          if [[ -n "${latest_release_tag}" ]]; then
+            inspect_args+=(--latest-release-tag "${latest_release_tag}")
+          fi
+
+          python3 "${inspect_args[@]}"
+      - name: Emit release decision summary
+        run: |
+          set -euo pipefail
+          summary_message="final_package_tag=${{ steps.publication_plan.outputs.final_package_tag }}, release_channel=${{ inputs.release_channel }}, mode=${{ steps.release_status.outputs.mode }}, package_contract_matches=${{ steps.publication_plan.outputs.package_contract_matches }}, remote_tag_exists=${{ steps.publication_plan.outputs.remote_tag_exists }}"
+          echo "::notice title=Release decision::${summary_message}"
+          {
+            echo "### Release decision"
+            echo ""
+            echo "- Upstream tag: \`${{ needs.resolve.outputs.upstream_tag }}\`"
+            echo "- Initial build tag: \`${{ needs.resolve.outputs.build_tag }}\`"
+            echo "- Final package tag: \`${{ steps.publication_plan.outputs.final_package_tag }}\`"
+            echo "- Release channel: \`${{ inputs.release_channel }}\`"
+            echo "- Release mode: \`${{ steps.release_status.outputs.mode }}\`"
+            echo "- Package contract matches latest alpha: \`${{ steps.publication_plan.outputs.package_contract_matches }}\`"
+            echo "- Remote tag exists: \`${{ steps.publication_plan.outputs.remote_tag_exists }}\`"
+            echo "- Missing assets: \`${{ steps.release_status.outputs.missing_assets }}\`"
+            echo "- Runtime contract: OpenFOAM links Apple SDK system libraries (/usr/lib/libz.1.dylib, /usr/lib/libc++.1.dylib)"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Validate generated package contract
+        if: ${{ steps.release_status.outputs.mode != 'skip' }}
+        run: |
+          python3 scripts/spm/validate_package_contract.py \
+            --release-metadata artifacts/OpenFOAM/OpenFOAM.release.json \
+            --release-archive artifacts/OpenFOAM/OpenFOAM-14-*.xcframework.zip \
+            --package-tag-override "${{ steps.publication_plan.outputs.final_package_tag }}"
+      - name: Render Package.swift
+        if: ${{ steps.release_status.outputs.mode != 'skip' }}
+        run: |
+          python3 scripts/spm/render_package.py \
+            --release-metadata artifacts/OpenFOAM/OpenFOAM.release.json \
+            --package-tag-override "${{ steps.publication_plan.outputs.final_package_tag }}" \
+            --output Package.swift
+      - name: Validate manifest
+        if: ${{ steps.release_status.outputs.mode != 'skip' }}
+        run: swift package dump-package >/dev/null
+      - name: Commit and tag release manifest
+        if: ${{ steps.release_status.outputs.mode != 'skip' }}
+        id: release_commit
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [[ "${{ steps.publication_plan.outputs.remote_tag_exists }}" == "true" ]]; then
+            git fetch origin "refs/tags/${{ steps.publication_plan.outputs.final_package_tag }}:refs/tags/${{ steps.publication_plan.outputs.final_package_tag }}"
+            tagged_package_file="$RUNNER_TEMP/tagged-Package.swift"
+            git show "refs/tags/${{ steps.publication_plan.outputs.final_package_tag }}:Package.swift" > "$tagged_package_file"
+            if ! cmp -s Package.swift "$tagged_package_file"; then
+              echo "package tag already exists with a different Package.swift" >&2
+              exit 1
+            fi
+            tagged_release_metadata_file="$RUNNER_TEMP/tagged-current-release.json"
+            git show "refs/tags/${{ steps.publication_plan.outputs.final_package_tag }}:scripts/spm/current_release.json" > "$tagged_release_metadata_file"
+            if ! cmp -s scripts/spm/current_release.json "$tagged_release_metadata_file"; then
+              echo "package tag already exists with a different scripts/spm/current_release.json" >&2
+              exit 1
+            fi
+            commit_sha="$(git rev-parse "refs/tags/${{ steps.publication_plan.outputs.final_package_tag }}^{commit}")"
+          else
+            git switch --detach "${{ github.sha }}"
+            git add Package.swift scripts/spm/current_release.json
+            if ! git diff --cached --quiet; then
+              git commit -m "Release ${{ steps.publication_plan.outputs.final_package_tag }} for OpenFOAM-14 ${{ needs.resolve.outputs.upstream_tag }}"
+            fi
+            commit_sha="$(git rev-parse HEAD)"
+            git tag "${{ steps.publication_plan.outputs.final_package_tag }}" "${commit_sha}"
+            git push origin "refs/tags/${{ steps.publication_plan.outputs.final_package_tag }}"
+          fi
+
+          echo "sha=${commit_sha}" >> "$GITHUB_OUTPUT"
+      - name: Update default branch for stable release
+        if: ${{ inputs.publish_to_default_branch && inputs.release_channel == 'stable' && steps.release_status.outputs.mode != 'skip' }}
+        run: |
+          set -euo pipefail
+          TARGET_BRANCH="${{ github.event.repository.default_branch || 'main' }}"
+          git fetch origin "${TARGET_BRANCH}"
+          git checkout -B "${TARGET_BRANCH}" "origin/${TARGET_BRANCH}"
+          git show "${{ steps.release_commit.outputs.sha }}:Package.swift" > Package.swift
+          git show "${{ steps.release_commit.outputs.sha }}:scripts/spm/current_release.json" > scripts/spm/current_release.json
+          git add Package.swift scripts/spm/current_release.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Update SwiftPM manifest for ${{ steps.publication_plan.outputs.final_package_tag }}"
+            git push origin "HEAD:${TARGET_BRANCH}"
+          fi
+      - name: Publish or repair GitHub Release
+        if: ${{ steps.release_status.outputs.mode != 'skip' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          assets=(
+            artifacts/OpenFOAM/OpenFOAM-14-${{ needs.resolve.outputs.upstream_tag }}-apple.xcframework.zip
+          )
+          if [[ "${{ steps.release_status.outputs.release_exists }}" != "true" ]]; then
+            release_args=(
+              "${{ steps.publication_plan.outputs.final_package_tag }}"
+              "${assets[@]}"
+              --repo "${{ github.repository }}"
+              --title "${{ steps.publication_plan.outputs.final_package_tag }}"
+              --notes "Automated SwiftPM binary release for upstream OpenFOAM-14 tag ${{ needs.resolve.outputs.upstream_tag }}."
+              --target "${{ steps.release_commit.outputs.sha }}"
+            )
+            if [[ "${{ inputs.release_channel }}" != "stable" ]]; then
+              release_args+=(--prerelease --latest=false)
+            fi
+            gh release create "${release_args[@]}"
+          else
+            gh release upload "${{ steps.publication_plan.outputs.final_package_tag }}" "${assets[@]}" --clobber --repo "${{ github.repository }}"
+            if [[ "${{ steps.release_status.outputs.metadata_needs_repair }}" == "true" ]]; then
+              release_id="$(
+                gh api "repos/${{ github.repository }}/releases/tags/${{ steps.publication_plan.outputs.final_package_tag }}" --jq '.id'
+              )"
+              if [[ "${{ inputs.release_channel }}" != "stable" ]]; then
+                gh api --method PATCH "repos/${{ github.repository }}/releases/${release_id}" \
+                  -F prerelease=true \
+                  -F make_latest=false >/dev/null
+              else
+                gh api --method PATCH "repos/${{ github.repository }}/releases/${release_id}" \
+                  -F prerelease=false >/dev/null
+              fi
+            fi
+          fi

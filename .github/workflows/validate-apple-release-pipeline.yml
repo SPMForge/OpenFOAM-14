@@ -1,0 +1,234 @@
+name: validate-apple-release-pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: "Optional upstream OpenFOAM-14 tag override in YYYYMMDD format"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openfoam-14-apple-spm-validate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      upstream_tag: ${{ steps.resolve.outputs.upstream_tag }}
+      package_tag: ${{ steps.resolve.outputs.package_tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Run packaging unit tests
+        run: |
+          python3 -m unittest \
+            scripts.spm.tests.test_spm_packaging \
+            scripts.spm.tests.test_release_flow \
+            scripts.spm.tests.test_release_state \
+            scripts.spm.tests.test_source_acquisition \
+            scripts.spm.tests.test_xcframework_validation \
+            scripts.tests.test_release_branch_workflows
+      - name: Fetch upstream tags
+        run: python3 scripts/spm/source_acquisition.py fetch-tags
+      - name: Fetch existing package tags
+        run: git fetch origin "refs/tags/*:refs/tags/*"
+      - name: Resolve validation upstream tag
+        id: resolve
+        run: |
+          python3 scripts/spm/select_upstream_tag.py \
+            --explicit-tag "${{ inputs.upstream_tag }}" \
+            --release-channel sync \
+            --github-output "$GITHUB_OUTPUT"
+
+  build:
+    needs: verify
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - OpenFOAM
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Restore Homebrew download cache
+        id: restore-homebrew-download-cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.homebrew-cache
+          key: homebrew-downloads-${{ runner.os }}-${{ runner.arch }}-cmake-ccache-v1
+          restore-keys: |
+            homebrew-downloads-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install build tools
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_CACHE: ${{ github.workspace }}/.homebrew-cache
+        run: |
+          mkdir -p "$HOMEBREW_CACHE"
+          missing_formulae=()
+          for formula in cmake ccache; do
+            if ! command -v "$formula" >/dev/null 2>&1; then
+              missing_formulae+=("$formula")
+            fi
+          done
+          if (( ${#missing_formulae[@]} > 0 )); then
+            brew install "${missing_formulae[@]}"
+          fi
+      - name: Resolve Xcode version
+        id: xcode
+        run: |
+          version_line="$(xcodebuild -version | tr '\n' '-' | tr ' ' '_' | sed 's/-$//')"
+          echo "version_key=${version_line}" >> "$GITHUB_OUTPUT"
+      - name: Preflight Apple platforms
+        id: preflight-apple-platforms
+        run: |
+          python3 scripts/spm/preflight_apple_platforms.py \
+            --variant "${{ matrix.variant }}"
+      - name: Restore compiler cache
+        id: restore_ccache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version_key }}-${{ matrix.variant }}-${{ hashFiles('scripts/spm/build_apple_xcframework.py', 'scripts/spm/archive_builder.py', 'scripts/spm/packaging.py', 'scripts/spm/platforms.json', 'toolchains/ios.toolchain.cmake') }}-${{ needs.verify.outputs.upstream_tag }}
+          restore-keys: |
+            ccache-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version_key }}-${{ matrix.variant }}-${{ hashFiles('scripts/spm/build_apple_xcframework.py', 'scripts/spm/archive_builder.py', 'scripts/spm/packaging.py', 'scripts/spm/platforms.json', 'toolchains/ios.toolchain.cmake') }}-
+            ccache-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version_key }}-${{ matrix.variant }}-
+      - name: Configure compiler cache
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size=5G
+          ccache --zero-stats
+      - name: Validate committed Package.swift
+        run: swift package dump-package >/dev/null
+      - name: Fetch upstream tags
+        run: python3 scripts/spm/source_acquisition.py fetch-tags
+      - name: Export upstream source
+        run: |
+          python3 scripts/spm/source_acquisition.py export-source \
+            --upstream-tag "${{ needs.verify.outputs.upstream_tag }}" \
+            --destination "${RUNNER_TEMP}/upstream-source"
+      - name: Build XCFramework
+        id: build_xcframework
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: |
+          python3 scripts/spm/build_apple_xcframework.py \
+            --variant "${{ matrix.variant }}" \
+            --upstream-tag "${{ needs.verify.outputs.upstream_tag }}" \
+            --package-tag "${{ needs.verify.outputs.package_tag }}" \
+            --source-root "${RUNNER_TEMP}/upstream-source" \
+            --output-dir "${RUNNER_TEMP}/spm-artifacts"
+      - name: Verify compiler cache payload
+        id: verify_ccache_payload
+        if: ${{ steps.restore_ccache.outcome == 'success' && steps.build_xcframework.outcome == 'success' }}
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: |
+          cache_files="$(find "$CCACHE_DIR" -type f ! -name 'ccache.conf' -print -quit)"
+          if [[ -z "$cache_files" ]]; then
+            echo "compiler cache remained empty after build-xcframework" >&2
+            exit 1
+          fi
+      - name: Save compiler cache
+        if: ${{ steps.restore_ccache.outcome == 'success' && steps.build_xcframework.outcome == 'success' && steps.verify_ccache_payload.outcome == 'success' && steps.restore_ccache.outputs.cache-hit != 'true' && steps.restore_ccache.outputs.cache-primary-key != '' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ${{ steps.restore_ccache.outputs.cache-primary-key }}
+      - name: Validate built XCFramework archive
+        run: |
+          python3 scripts/spm/validate_mergeable_xcframework.py \
+            --require-platform ios \
+            --require-platform ios-simulator \
+            --require-platform ios-maccatalyst \
+            --require-platform macos \
+            --require-platform tvos \
+            --require-platform tvos-simulator \
+            --require-platform watchos \
+            --require-platform watchos-simulator \
+            --require-platform xros \
+            --require-platform xros-simulator \
+            "${RUNNER_TEMP}/spm-artifacts/${{ matrix.variant }}"/*.xcframework.zip
+      - name: Show compiler cache stats
+        id: build-ccache-stats
+        if: always()
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: ccache --show-stats
+      - name: Upload validation artifacts
+        id: upload-validation-artifacts
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: validate-${{ matrix.variant }}
+          overwrite: true
+          path: |
+            ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/*.xcframework.zip
+            ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/${{ matrix.variant }}.release.json
+      - name: Retry upload validation artifacts
+        id: retry-upload-validation-artifacts
+        if: steps.upload-validation-artifacts.outcome != 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: validate-${{ matrix.variant }}
+          overwrite: true
+          path: |
+            ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/*.xcframework.zip
+            ${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/${{ matrix.variant }}.release.json
+
+  package_contract:
+    needs:
+      - verify
+      - build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Download OpenFOAM validation artifacts
+        id: download-openfoam-artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: validate-OpenFOAM
+          path: artifacts/OpenFOAM
+      - name: Retry download OpenFOAM validation artifacts
+        id: retry-download-openfoam-artifacts
+        if: steps.download-openfoam-artifacts.outcome != 'success'
+        uses: actions/download-artifact@v8
+        with:
+          name: validate-OpenFOAM
+          path: artifacts/OpenFOAM
+      - name: Validate generated package contract
+        id: validate-generated-package-contract
+        run: |
+          python3 scripts/spm/validate_package_contract.py \
+            --release-metadata artifacts/OpenFOAM/OpenFOAM.release.json \
+            --release-archive artifacts/OpenFOAM/OpenFOAM-14-*.xcframework.zip

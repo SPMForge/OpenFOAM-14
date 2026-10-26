@@ -1,0 +1,33 @@
+name: publish-upstream-release-manually
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: "Upstream OpenFOAM-14 tag in YYYYMMDD format"
+        required: true
+        type: string
+      release_channel:
+        description: "Release channel policy for the selected upstream tag"
+        required: true
+        type: choice
+        default: alpha
+        options:
+          - alpha
+          - stable
+      publish_to_default_branch:
+        description: "Also update the default branch when publishing a stable release"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    uses: ./.github/workflows/_publish-upstream-release-core.yml
+    with:
+      upstream_tag: ${{ inputs.upstream_tag }}
+      release_channel: ${{ inputs.release_channel }}
+      publish_to_default_branch: ${{ inputs.release_channel == 'stable' && inputs.publish_to_default_branch }}

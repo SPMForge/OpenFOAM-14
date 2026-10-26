@@ -1,0 +1,9 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+__pycache__/
+*.pyc
+.ccache/
+.homebrew-cache/
+Artifacts/

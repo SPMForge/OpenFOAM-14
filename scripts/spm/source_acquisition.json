@@ -1,0 +1,5 @@
+{
+  "upstream_remote_name": "upstream",
+  "upstream_repository_url": "https://github.com/OpenFOAM/OpenFOAM-14.git",
+  "upstream_tag_ref_prefix": "refs/upstream-tags"
+}

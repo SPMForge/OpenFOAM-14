@@ -1,0 +1,41 @@
+{
+  "owner": "SPMForge",
+  "package_name": "OpenFOAM-14",
+  "releases": [
+    {
+      "asset_name": "OpenFOAM-14-20261008-apple.xcframework.zip",
+      "checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "forbidden_runtime_dependencies": [],
+      "module_name": "OpenFOAM",
+      "package_tag": "14.0.20261008-alpha.1",
+      "platforms": [
+        "ios",
+        "ios-simulator",
+        "macos",
+        "ios-maccatalyst",
+        "tvos",
+        "tvos-simulator",
+        "watchos",
+        "watchos-simulator",
+        "xros",
+        "xros-simulator"
+      ],
+      "product_name": "OpenFOAM",
+      "runtime_dependencies": [
+        "/usr/lib/libz.1.dylib",
+        "/usr/lib/libc++.1.dylib"
+      ],
+      "runtime_dependency_model": "system-only",
+      "runtime_dependency_supplier": "apple-sdk",
+      "strong_runtime_dependencies": [
+        "/usr/lib/libz.1.dylib",
+        "/usr/lib/libc++.1.dylib"
+      ],
+      "target_name": "OpenFOAM",
+      "upstream_tag": "20261008",
+      "url": "https://github.com/SPMForge/OpenFOAM-14/releases/download/14.0.20261008-alpha.1/OpenFOAM-14-20261008-apple.xcframework.zip",
+      "weak_runtime_dependencies": []
+    }
+  ],
+  "repo": "OpenFOAM-14"
+}

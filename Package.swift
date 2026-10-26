@@ -19,7 +19,7 @@ let package = Package(
         .binaryTarget(
             name: "OpenFOAM",
             url: "https://github.com/SPMForge/OpenFOAM-14/releases/download/14.0.20261008-alpha.1/OpenFOAM-14-20261008-apple.xcframework.zip",
-            checksum: "0000000000000000000000000000000000000000000000000000000000000000"
+            checksum: "dcbb551bb6db5f7c9a28a137a17644c4439348bfcf70243905ef45f861d566be"
         )
     ]
 )

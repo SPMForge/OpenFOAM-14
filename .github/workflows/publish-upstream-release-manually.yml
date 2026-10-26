@@ -1,4 +1,4 @@
-name: publish-upstream-release-manually
+name: Publish Upstream Release Manually
 
 on:
   workflow_dispatch:

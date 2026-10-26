@@ -42,7 +42,7 @@ class ReleaseBranchWorkflowTests(unittest.TestCase):
 
     def test_sync_workflow_delegates_to_shared_publish_core(self) -> None:
         workflow = SYNC_WORKFLOW_PATH.read_text()
-        self.assertIn("name: publish-latest-upstream-alpha", workflow)
+        self.assertIn("name: Publish Latest Upstream Alpha", workflow)
         self.assertIn("schedule:", workflow)
         self.assertIn("workflow_dispatch:", workflow)
         self.assertNotIn("push:", workflow)
@@ -53,7 +53,7 @@ class ReleaseBranchWorkflowTests(unittest.TestCase):
 
     def test_backfill_workflow_delegates_to_shared_publish_core(self) -> None:
         workflow = BACKFILL_WORKFLOW_PATH.read_text()
-        self.assertIn("name: publish-upstream-release-manually", workflow)
+        self.assertIn("name: Publish Upstream Release Manually", workflow)
         self.assertIn("workflow_dispatch:", workflow)
         self.assertNotIn("schedule:", workflow)
         self.assertNotIn("push:", workflow)
@@ -88,7 +88,7 @@ class ReleaseBranchWorkflowTests(unittest.TestCase):
     def test_validate_workflow_runs_on_push_and_pull_request(self) -> None:
         workflow = VALIDATE_WORKFLOW_PATH.read_text()
         build_job = self._job_section(workflow, "build", "package_contract")
-        self.assertIn("name: validate-apple-release-pipeline", workflow)
+        self.assertIn("name: Validate Apple Release Pipeline", workflow)
         self.assertIn("push:", workflow)
         self.assertIn("- main", workflow)
         self.assertIn("pull_request:", workflow)

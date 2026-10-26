@@ -1,4 +1,4 @@
-name: _publish-upstream-release-core
+name: Publish Package Release Core
 'on':
   workflow_call:
     inputs:
@@ -102,6 +102,8 @@ jobs:
     needs: verify
     name: Resolve
   build:
+    outputs:
+      toolchain: ${{ steps.artifact_inventory.outputs.toolchain }}
     needs:
       - verify
       - resolve
@@ -225,6 +227,7 @@ jobs:
             --generated-root "$RUNNER_TEMP/spm-artifacts/${{ matrix.variant }}/cmake_src" \
             --output "${{ runner.temp }}/spm-artifacts/${{ matrix.variant }}/OpenFOAM-14-${{ needs.resolve.outputs.upstream_tag }}-source.tar.gz"
       - name: Record immutable artifact inventory
+        id: artifact_inventory
         run: python3 scripts/ci_artifacts.py record --root "$RUNNER_TEMP/spm-artifacts/${{ matrix.variant }}"
       - name: Upload built artifacts
         id: upload-artifacts
@@ -283,6 +286,9 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ github.token }}
   release:
+    outputs:
+      package_tag: ${{ steps.publication_plan.outputs.final_package_tag }}
+      action: ${{ steps.release_status.outputs.mode }}
     needs:
       - resolve
       - build
@@ -579,6 +585,7 @@ jobs:
       - name: Report all stage results
         env:
           CI_NEEDS: ${{ toJSON(needs) }}
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci_artifacts.py summary
     needs:
       - verify

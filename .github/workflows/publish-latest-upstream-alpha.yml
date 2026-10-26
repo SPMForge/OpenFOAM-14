@@ -1,4 +1,4 @@
-name: publish-latest-upstream-alpha
+name: Publish Latest Upstream Alpha
 
 on:
   schedule:

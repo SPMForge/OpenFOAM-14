@@ -1,4 +1,4 @@
-name: validate-apple-release-pipeline
+name: Validate Apple Release Pipeline
 'on':
   push:
     branches:
@@ -61,6 +61,8 @@ jobs:
       package_tag: ${{ steps.resolve.outputs.package_tag }}
       upstream_commit: ${{ steps.release_inputs.outputs.upstream_commit }}
   build:
+    outputs:
+      toolchain: ${{ steps.artifact_inventory.outputs.toolchain }}
     needs:
       - verify
       - resolve
@@ -169,6 +171,7 @@ jobs:
         name: Show compiler cache stats
         run: ccache --show-stats
       - name: Record immutable artifact inventory
+        id: artifact_inventory
         run: python3 scripts/ci_artifacts.py record --root "$RUNNER_TEMP/spm-artifacts/${{ matrix.variant }}"
       - continue-on-error: true
         id: upload-validation-artifacts
@@ -276,6 +279,7 @@ jobs:
       - name: Report all stage results
         env:
           CI_NEEDS: ${{ toJSON(needs) }}
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci_artifacts.py summary
     needs:
       - verify

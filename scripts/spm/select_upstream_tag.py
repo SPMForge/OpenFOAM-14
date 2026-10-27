@@ -13,6 +13,7 @@ if __package__ in {None, ""}:
 from scripts.spm import packaging
 from scripts.spm import source_acquisition
 from scripts.spm import tag_selection
+from scripts import release_inputs
 
 
 def _parse_arguments() -> argparse.Namespace:
@@ -28,6 +29,7 @@ def _parse_arguments() -> argparse.Namespace:
         "--ref-prefix",
         help="Git ref prefix scanned when --explicit-tag is not provided. Defaults to the repo-local source acquisition contract.",
     )
+    parser.add_argument("--github-repository", help="Reserve Git and public Release names.")
     parser.add_argument("--repo-root", default=packaging.REPO_ROOT, type=Path)
     parser.add_argument(
         "--github-output",
@@ -110,6 +112,14 @@ def _resolve_release_tags(arguments: argparse.Namespace, upstream_tag: str) -> t
         alpha_number=packaging.next_alpha_number_for_upstream_tag(upstream_tag, package_refs),
     )
 
+    repository = getattr(arguments, "github_repository", None)
+    if repository:
+        allocation = release_inputs.find_available_alpha(
+            arguments.repo_root, repository, next_alpha_tag, release_inputs.increment_alpha_tag)
+        next_alpha_tag = allocation['tag']
+        arguments.allocation_reason = allocation['reason']
+        print(allocation['reason'], file=sys.stderr)
+
     return latest_alpha_tag or next_alpha_tag, latest_alpha_tag or "", next_alpha_tag
 
 
@@ -131,6 +141,7 @@ def main() -> int:
             output_file.write(f"next_package_tag={next_package_tag}\n")
             output_file.write(f"remote_tag_exists={str(remote_tag_exists).lower()}\n")
             output_file.write(f"remote_tag_commit={remote_tag_commit}\n")
+            output_file.write(f"allocation_reason={getattr(arguments, 'allocation_reason', 'existing policy')}\n")
 
     print(
         json.dumps(

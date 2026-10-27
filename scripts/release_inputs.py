@@ -128,18 +128,81 @@ def read_release_state(repository: str, tag: str) -> tuple[dict | None, str | No
     return view, None if latest is None else latest['tag_name']
 
 
+def increment_alpha_tag(tag: str) -> str:
+    match = re.fullmatch(r'([0-9]+\.[0-9]+\.[0-9]+-alpha\.)([0-9]+)', tag)
+    if match is None:
+        raise ValueError(f'Invalid Alpha tag: {tag!r}')
+    return match[1] + str(int(match[2]) + 1)
+
+
+def alpha_name_occupied(root: Path, repository: str, tag: str) -> bool:
+    increment_alpha_tag(tag)  # Validate before using the name in refs or API paths.
+    if re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository) is None:
+        raise ValueError('Expected owner/repository')
+    reference = f'refs/tags/{tag}'
+    local = subprocess.run(['git', 'show-ref', '--verify', '--quiet', reference], cwd=root, capture_output=True)
+    if local.returncode not in (0, 1):
+        raise RuntimeError('Unable to establish local tag state')
+    remote = subprocess.run(['git', 'ls-remote', '--exit-code', '--tags', '--refs', 'origin', reference],
+                            cwd=root, capture_output=True, text=True)
+    if remote.returncode not in (0, 2):
+        raise RuntimeError('Unable to establish remote tag state')
+    release = github_json(f'repos/{repository}/releases/tags/{quote(tag, safe="")}')
+    if release is not None:
+        if (type(release.get('id')) is not int or release['id'] <= 0
+                or release.get('tag_name') != tag or type(release.get('draft')) is not bool
+                or not isinstance(release.get('assets'), list)):
+            raise ValueError('Incomplete or inconsistent GitHub Release response')
+    return local.returncode == 0 or remote.returncode == 0 or release is not None
+
+
+def find_available_alpha(root: Path, repository: str, candidate: str, increment,
+                         *, max_candidates: int = 1000) -> dict:
+    if not 1 <= max_candidates <= 1000:
+        raise ValueError('Candidate limit must be between 1 and 1000')
+    occupied = []
+    for _ in range(max_candidates):
+        if not alpha_name_occupied(root, repository, candidate):
+            return {'tag': candidate, 'occupied_tags': occupied,
+                    'reason': f'Exact Git and Release checks permit {candidate}; skipped {len(occupied)} occupied names'}
+        occupied.append(candidate)
+        next_candidate = increment(candidate)
+        if next_candidate == candidate:
+            raise ValueError('Alpha increment did not advance')
+        candidate = next_candidate
+    raise RuntimeError('Alpha candidate limit reached; no public name allocated')
+
+
+def assert_alpha_available(root: Path, repository: str, tag: str) -> None:
+    if alpha_name_occupied(root, repository, tag):
+        raise RuntimeError(f'Alpha name became occupied after Resolve: {tag}; rerun resolution without changing public state')
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['capture', 'verify-source', 'guard'])
+    parser.add_argument('command', choices=['capture', 'verify-source', 'guard', 'allocate-alpha', 'assert-alpha-available'])
     parser.add_argument('--repo-root', type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument('--upstream-tag')
     parser.add_argument('--upstream-commit')
     parser.add_argument('--tag')
     parser.add_argument('--release-channel', default='alpha')
     parser.add_argument('--github-output', type=Path)
+    parser.add_argument('--repository')
+    parser.add_argument('--output-name', default='next_package_tag')
     args = parser.parse_args()
     outputs = {}
-    if args.command == 'capture':
+    if args.command in ('allocate-alpha', 'assert-alpha-available'):
+        if not args.repository or not args.tag:
+            parser.error('Alpha name checks require --repository and --tag')
+        if args.command == 'assert-alpha-available':
+            assert_alpha_available(args.repo_root, args.repository, args.tag)
+            return
+        result = find_available_alpha(args.repo_root, args.repository, args.tag, increment_alpha_tag)
+        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', args.output_name):
+            parser.error('Invalid output name')
+        outputs = {args.output_name: result['tag'], 'allocation_reason': result['reason'],
+                   'occupied_alpha_tags': json.dumps(result['occupied_tags'])}
+    elif args.command == 'capture':
         if not args.upstream_tag:
             parser.error('--upstream-tag is required')
         record = capture(args.repo_root, args.upstream_tag, args.upstream_commit)

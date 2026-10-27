@@ -41,6 +41,7 @@ jobs:
       package_tag: ${{ steps.resolve.outputs.package_tag }}
       latest_package_tag: ${{ steps.resolve.outputs.latest_package_tag }}
       next_package_tag: ${{ steps.resolve.outputs.next_package_tag }}
+      allocation_reason: ${{ steps.resolve.outputs.allocation_reason }}
       remote_tag_exists: ${{ steps.resolve.outputs.remote_tag_exists }}
       remote_tag_commit: ${{ steps.resolve.outputs.remote_tag_commit }}
       release_mode: ${{ steps.release_status.outputs.mode }}
@@ -58,9 +59,12 @@ jobs:
         run: git fetch origin "refs/tags/*:refs/tags/*"
       - name: Resolve upstream tag
         id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 scripts/spm/select_upstream_tag.py \
             --explicit-tag "${{ inputs.upstream_tag }}" \
+            --github-repository "$GITHUB_REPOSITORY" \
             --release-channel "${{ inputs.release_channel }}" \
             --github-output "$GITHUB_OUTPUT"
       - name: Validate default-branch publish policy
@@ -446,6 +450,9 @@ jobs:
               git commit -m "Release ${{ steps.publication_plan.outputs.final_package_tag }} for OpenFOAM-14 ${{ needs.resolve.outputs.upstream_tag }}"
             fi
             commit_sha="$(git rev-parse HEAD)"
+            if [[ "${{ inputs.release_channel }}" != "stable" ]]; then
+              GH_TOKEN="${{ github.token }}" python3 scripts/release_inputs.py assert-alpha-available --repository "$GITHUB_REPOSITORY" --tag "${{ steps.publication_plan.outputs.final_package_tag }}"
+            fi
             git tag "${{ steps.publication_plan.outputs.final_package_tag }}" "${commit_sha}"
             git push origin "refs/tags/${{ steps.publication_plan.outputs.final_package_tag }}"
           fi

@@ -4,10 +4,10 @@
   "releases": [
     {
       "asset_name": "OpenFOAM-14-20261008-apple.xcframework.zip",
-      "checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "checksum": "3ce4cc862703b8f69924915103b4f6bf0f551eb3037a180095ce320e280eaeb1",
       "forbidden_runtime_dependencies": [],
       "module_name": "OpenFOAM",
-      "package_tag": "14.0.20261008-alpha.1",
+      "package_tag": "14.0.20261008-alpha.2",
       "platforms": [
         "ios",
         "ios-simulator",
@@ -33,7 +33,7 @@
       ],
       "target_name": "OpenFOAM",
       "upstream_tag": "20261008",
-      "url": "https://github.com/SPMForge/OpenFOAM-14/releases/download/14.0.20261008-alpha.1/OpenFOAM-14-20261008-apple.xcframework.zip",
+      "url": "https://github.com/SPMForge/OpenFOAM-14/releases/download/14.0.20261008-alpha.2/OpenFOAM-14-20261008-apple.xcframework.zip",
       "weak_runtime_dependencies": []
     }
   ],

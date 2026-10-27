@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "upstream_commit": "a4867fc914c10ee10c2f6f83c294c3d3160dd573",
+  "upstream_repository": "https://github.com/OpenFOAM/OpenFOAM-14.git",
+  "upstream_tag": "20261008",
+  "wrapper_inputs_sha256": "57d70a599064da845638878a9193ed4d9af7c9eedab644c3ae97e4471bec53e2"
+}

@@ -129,3 +129,11 @@ Alpha releases do not promote default-branch package metadata; a successful CI r
 alone does not establish that the default-branch binary URLs are downloadable.
 The Summary job records stage results and links to the run artifacts. Each build
 artifact inventory records upstream commit, toolchain and archive SHA-256 values.
+
+### Canonical release policy
+
+This repository's scripts and tests own its executable package contract. The shared
+policy references are [input identity and Alpha name allocation](https://github.com/RbBtSn0w/apple-skills/blob/main/app-develop/skills/apple-spm-binary-distribution/references/release-input-identity.md),
+[publication and repair decisions](https://github.com/RbBtSn0w/apple-skills/blob/main/app-develop/skills/apple-spm-binary-distribution/references/release-repair-and-metadata-normalization.md),
+and the [Actions stage contract](https://github.com/RbBtSn0w/apple-skills/blob/main/app-develop/skills/apple-spm-binary-distribution/references/ci-topologies.md).
+Use accepted version tags; Alpha publication does not promote the default-branch manifest.
